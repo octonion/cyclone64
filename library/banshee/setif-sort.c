@@ -1288,7 +1288,9 @@ bool setif_union_serialize(FILE *f, gen_e e) {
   /*   fwrite_s((void *)&expr->st, sizeof(stamp), 1, f); */
   /*   fwrite_s((void *)&expr->exprs, sizeof(gen_e_list), 1, f); */
   /*   fwrite_s((void *)&expr->proj_cache, sizeof(gen_e_list), 1, f); */
-  fwrite_s(&expr->st, sizeof(stamp) + sizeof(gen_e_list) * 2, 1, f);
+  fwrite_s(&expr->st, sizeof(expr->st), 1, f);
+  fwrite_s(&expr->exprs, sizeof(expr->exprs), 1, f);
+  fwrite_s(&expr->proj_cache, sizeof(expr->proj_cache), 1, f);
   serialize_banshee_object(expr->exprs, list);
   serialize_banshee_object(expr->proj_cache, list);
 
@@ -1302,7 +1304,8 @@ bool setif_inter_serialize(FILE *f, gen_e e) {
 
   /*   fwrite_s((void *)&expr->st, sizeof(stamp), 1, f); */
   /*   fwrite_s((void *)&expr->exprs, sizeof(gen_e_list), 1, f); */
-  fwrite_s(&expr->st, sizeof(stamp) + sizeof(gen_e_list), 1, f);
+  fwrite_s(&expr->st, sizeof(expr->st), 1, f);
+  fwrite_s(&expr->exprs, sizeof(expr->exprs), 1, f);
 
   serialize_banshee_object(expr->exprs, list);
 
@@ -1326,8 +1329,11 @@ void *setif_union_deserialize(FILE *f) {
   /*   fread_s((void *)&expr->st, sizeof(stamp), 1, f); */
   /*   fread_s((void *)&expr->exprs, sizeof(gen_e_list), 1, f); */
   /*   fread_s((void *)&expr->proj_cache, sizeof(gen_e_list), 1, f); */
-  fread_s(&expr->st, sizeof(stamp) + 2 * sizeof(gen_e_list), 1, f);
+  fread_s(&expr->st, sizeof(expr->st), 1, f);
+  fread_s(&expr->exprs, sizeof(expr->exprs), 1, f);
+  fread_s(&expr->proj_cache, sizeof(expr->proj_cache), 1, f);
 
+  expr->type = UNION_TYPE;
   return expr;
 }
 
@@ -1335,8 +1341,10 @@ void *setif_inter_deserialize(FILE *f) {
   setif_inter_ expr = ralloc(setif_term_region, struct setif_inter_);
   /*   fread_s((void *)&expr->st, sizeof(stamp), 1, f); */
   /*   fread_s((void *)&expr->exprs, sizeof(gen_e_list), 1, f); */
-  fread_s(&expr->st, sizeof(stamp) + sizeof(gen_e_list), 1, f);
+  fread_s(&expr->st, sizeof(expr->st), 1, f);
+  fread_s(&expr->exprs, sizeof(expr->exprs), 1, f);
 
+  expr->type = INTER_TYPE;
   return expr;
 }
 
@@ -1344,8 +1352,11 @@ void *setif_constant_deserialize(FILE *f) {
   setif_constant_ c = ralloc(setif_term_region, struct setif_constant_);
 
   fread_s((void *)&c->st, sizeof(stamp), 1, f);
-  c->name = string_data_deserialize(f);
+  char *restored_name = string_data_deserialize(f);
+  c->name = rstrdup(setif_term_region, restored_name);
+  free(restored_name);
 
+  c->type = CONSTANT_TYPE;
   return c;
 }
 

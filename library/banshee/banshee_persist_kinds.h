@@ -83,6 +83,10 @@ typedef enum banshee_persist_kind_ {
 void banshee_serialize_start(FILE *f);
 void banshee_serialize_end();
 
+/* Returns false if a serializer reports failure; discard that file.
+ * Legacy fwrite_s hooks can still terminate on I/O errors. */
+bool banshee_serialize_finish(void);
+
 /* Deserialization */
 void banshee_deserialize_all(FILE *f);
 void banshee_deserialize_end();

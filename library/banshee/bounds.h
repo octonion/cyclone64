@@ -79,6 +79,8 @@ void bounds_reset();
 
 /* Create a new bounds representation stored in region r */
 bounds bounds_create(region r);
+/* Copy the stored keys as well as values, including pre-unification stamps. */
+bounds bounds_copy(region r, bounds source);
 
 /* Create a new persistent bounds */
 bounds bounds_persistent_create();

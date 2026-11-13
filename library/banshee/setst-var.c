@@ -37,6 +37,7 @@
 #include "jcollection.h"
 #include "regions.h"
 #include "ufind.h"
+#include "setst-sort.h"
 
 struct st_info {
   stamp st;
@@ -49,6 +50,7 @@ struct st_info {
   int path_pos;
   int src_sz;
   int snk_sz;
+  int write_time; /* epoch of the writable bounds snapshot */
 };
 
 typedef struct st_info *st_info;
@@ -77,15 +79,16 @@ static setst_var make_var(region r, const char *name, stamp st) {
   st_info info = ralloc(r, struct st_info);
 
   info->st = st;
-  info->lbs = bounds_create(r);
-  info->sources = bounds_create(r);
-  info->sinks = bounds_create(r);
+  info->lbs = bounds_persistent_create();
+  info->sources = bounds_persistent_create();
+  info->sinks = bounds_persistent_create();
   info->tlb_cache = NULL;
   info->name = name ? rstrdup(r, name) : "fv";
   info->seen = FALSE;
   info->path_pos = 0;
   info->src_sz = 0;
   info->snk_sz = 0;
+  info->write_time = -1;
 
   result->type = VAR_TYPE;
   result->elt = new_st_elt(r, info);
@@ -128,16 +131,38 @@ bounds st_get_sources(setst_var v) { return get_info(v)->sources; }
 
 bounds st_get_sinks(setst_var v) { return get_info(v)->sinks; }
 
+/* Bounds are mutable, while union-find history saves info pointers. Copy the
+ * three bounds before the first write in an epoch so rollback can restore an
+ * immutable prior snapshot, including changes made by cycle collapsing. */
+static st_info writable_info(setst_var v) {
+  st_info old = get_info(v);
+#ifdef BANSHEE_ROLLBACK
+  setst_register_rollback();
+  if (old->write_time != banshee_get_time()) {
+    region r = regionof(old);
+    st_info copy = ralloc(r, struct st_info);
+    *copy = *old;
+    copy->lbs = bounds_copy(NULL, old->lbs);
+    copy->sources = bounds_copy(NULL, old->sources);
+    copy->sinks = bounds_copy(NULL, old->sinks);
+    copy->write_time = banshee_get_time();
+    st_elt_update(v->elt, copy);
+    return copy;
+  }
+#endif
+  return old;
+}
+
 bool st_add_lb(setst_var v, setst_var lb) {
-  return bounds_add(get_info(v)->lbs, (gen_e)lb, st_get_stamp(lb));
+  return bounds_add(writable_info(v)->lbs, (gen_e)lb, st_get_stamp(lb));
 }
 
 bool st_add_source(setst_var v, gen_e source, stamp s) {
-  return bounds_add(get_info(v)->sources, source, s);
+  return bounds_add(writable_info(v)->sources, source, s);
 }
 
 bool st_add_sink(setst_var v, gen_e sink, stamp s) {
-  return bounds_add(get_info(v)->sinks, sink, s);
+  return bounds_add(writable_info(v)->sinks, sink, s);
 }
 
 jcoll st_get_tlb_cache(setst_var v) { return get_info(v)->tlb_cache; }
@@ -147,18 +172,28 @@ void st_set_tlb_cache(setst_var v, jcoll j) { get_info(v)->tlb_cache = j; }
 void st_clear_tlb_cache(setst_var v) { get_info(v)->tlb_cache = NULL; }
 
 gen_e st_get_ub_proj(setst_var v, get_proj_fn_ptr get_proj) {
-  return get_proj(bounds_exprs(st_get_sinks(v)));
+  gen_e_list sinks = new_gen_e_list(regionof(v));
+  bounds_scanner scan;
+  gen_e sink;
+  bounds_scan(st_get_sinks(v), &scan);
+  while (bounds_next(&scan, &sink)) gen_e_list_cons(sink, sinks);
+  return get_proj(sinks);
 }
 
 static setst_var rb_v1;
 
 bool neq(const setst_var v2) { return (!(st_get_stamp(rb_v1) == st_get_stamp(v2))); }
 
-void st_repair_bounds(setst_var v1) {
-  rb_v1 = v1;
-
-  setst_var_list lbs = setst_var_list_filter2((setst_var_list)bounds_exprs(st_get_lbs(v1)), neq);
-  bounds_set(get_info(v1)->lbs, (gen_e_list)lbs);
+void st_repair_bounds(setst_var v) {
+  st_info info = writable_info(v);
+  bounds replacement = bounds_persistent_create();
+  bounds_scanner scan;
+  gen_e lb;
+  bounds_scan(info->lbs, &scan);
+  while (bounds_next(&scan, &lb))
+    if (!st_eq(v, (setst_var)lb))
+      bounds_add(replacement, lb, st_get_stamp((setst_var)lb));
+  info->lbs = replacement;
 }
 
 void st_set_path_pos(setst_var v, int pos) { get_info(v)->path_pos = pos; }
@@ -177,40 +212,51 @@ void st_set_snk_sz(setst_var v, int size) { get_info(v)->snk_sz = size; }
 
 int st_get_snk_sz(setst_var v) { return get_info(v)->snk_sz; }
 
-/* Persistence */
-
-/* TODO */
+/* Persistence: caches and iteration counters are rebuilt, not checkpointed. */
 bool setst_var_serialize(FILE *f, void *obj) {
-  fail("setst persistence not implemented");
-  return FALSE;
+  setst_var v = obj;
+  fwrite_s(&v->elt, sizeof(v->elt), 1, f);
+  return serialize_banshee_object(v->elt, uf_element);
 }
-
-/* TODO */
 void *setst_var_deserialize(FILE *f) {
-  fail("setst persistence not implemented");
-  return NULL;
+  setst_var v = ralloc(setst_region, struct setst_var);
+  v->type = VAR_TYPE;
+  fread_s(&v->elt, sizeof(v->elt), 1, f);
+  return v;
 }
-
-/* TODO */
 bool setst_var_set_fields(void *obj) {
-  fail("setst persistence not implemented");
-  return FALSE;
+  return deserialize_set_obj((void **)&((setst_var)obj)->elt);
 }
-
-/* TODO */
 bool st_info_serialize(FILE *f, void *obj) {
-  fail("setst persistence not implemented");
-  return FALSE;
+  st_info i = obj;
+  fwrite_s(&i->st, sizeof(i->st), 1, f);
+  fwrite_s(&i->write_time, sizeof(i->write_time), 1, f);
+  fwrite_s(&i->lbs, sizeof(i->lbs), 1, f);
+  fwrite_s(&i->sources, sizeof(i->sources), 1, f);
+  fwrite_s(&i->sinks, sizeof(i->sinks), 1, f);
+  string_data_serialize(f, i->name);
+  serialize_banshee_object(i->lbs, bounds);
+  serialize_banshee_object(i->sources, bounds);
+  serialize_banshee_object(i->sinks, bounds);
+  return TRUE;
 }
-
-/* TODO */
 void *st_info_deserialize(FILE *f) {
-  fail("setst persistence not implemented");
-  return NULL;
+  st_info i = ralloc(setst_region, struct st_info);
+  fread_s(&i->st, sizeof(i->st), 1, f);
+  fread_s(&i->write_time, sizeof(i->write_time), 1, f);
+  fread_s(&i->lbs, sizeof(i->lbs), 1, f);
+  fread_s(&i->sources, sizeof(i->sources), 1, f);
+  fread_s(&i->sinks, sizeof(i->sinks), 1, f);
+  char *name = string_data_deserialize(f);
+  i->name = rstrdup(setst_region, name);
+  free(name);
+  i->src_sz = i->snk_sz = -1;
+  return i;
 }
-
-/* TODO */
 bool st_info_set_fields(void *obj) {
-  fail("setst persistence not implemented");
-  return FALSE;
+  st_info i = obj;
+  bool ok = deserialize_set_obj((void **)&i->lbs);
+  ok &= deserialize_set_obj((void **)&i->sources);
+  ok &= deserialize_set_obj((void **)&i->sinks);
+  return ok;
 }

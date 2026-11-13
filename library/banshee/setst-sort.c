@@ -29,6 +29,7 @@
  */
 
 #include "setst-sort.h"
+#include "banshee_persist_kinds.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -79,6 +80,32 @@ static bool setst_changed = FALSE;
 region setst_region;
 term_hash setst_hash;
 struct setst_stats setst_stats;
+
+struct setst_cache_undo {
+  setst_union_ term;
+  gen_e_list previous;
+  struct setst_cache_undo *next;
+};
+struct setst_rollback_info_ {
+  int time;
+  sort_kind kind;
+  struct setst_cache_undo *caches;
+  struct setst_rollback_info_ *previous;
+};
+static struct setst_rollback_info_ *setst_current_rollback;
+
+void setst_register_rollback(void) {
+#ifdef BANSHEE_ROLLBACK
+  if (!banshee_check_rollback(setst_sort)) {
+    struct setst_rollback_info_ *info = ralloc(setst_region, struct setst_rollback_info_);
+    banshee_set_time((banshee_rollback_info)info);
+    info->kind = setst_sort;
+    info->previous = setst_current_rollback;
+    setst_current_rollback = info;
+    banshee_register_rollback((banshee_rollback_info)info);
+  }
+#endif
+}
 
 stamp setst_get_stamp(gen_e e) {
 #ifdef NONSPEC
@@ -328,7 +355,7 @@ gen_e setst_inter(gen_e_list exprs) deletes {
     if ((result = term_hash_find(setst_hash, st, gen_e_list_length(filtered) + 1)) == NULL) {
       struct setst_inter_ *u = ralloc(setst_region, struct setst_inter_);
 
-      u->type = UNION_TYPE;
+      u->type = INTER_TYPE;
       u->st = stamp_fresh();
       u->exprs = filtered;
 
@@ -679,6 +706,15 @@ gen_e_list setst_tlb(gen_e e, incl_fn_ptr setst_incl) deletes {
 void setst_set_proj_cache(gen_e e, gen_e elem) {
   if (setst_is_union(e)) {
     setst_union_ u = (setst_union_)e;
+#ifdef BANSHEE_ROLLBACK
+    setst_register_rollback();
+    struct setst_cache_undo *undo = ralloc(setst_region, struct setst_cache_undo);
+    undo->term = u;
+    undo->previous = u->proj_cache;
+    undo->next = setst_current_rollback->caches;
+    setst_current_rollback->caches = undo;
+    u->proj_cache = gen_e_list_copy(setst_region, u->proj_cache);
+#endif
     gen_e_list_cons(elem, u->proj_cache);
   }
 }
@@ -694,6 +730,8 @@ gen_e_list setst_get_proj_cache(gen_e e) {
 }
 
 void setst_init(void) {
+  setst_current_rollback = NULL;
+  setst_changed = FALSE;
   setst_region = newregion();
   tlb_cache_region = newregion();
   setst_hash = make_term_hash(NULL);
@@ -702,6 +740,7 @@ void setst_init(void) {
 }
 
 void setst_reset(void) deletes {
+  setst_current_rollback = NULL;
   term_hash_delete(setst_hash);
   deleteregion_ptr(&setst_region);
 
@@ -778,24 +817,116 @@ void setst_print_stats(FILE *f) {
   fprintf(f, "=====================================\n");
 }
 
-void setst_rollback(banshee_rollback_info info) { assert(0); }
-
-bool setst_rollback_serialize(FILE *f, banshee_rollback_info info) {
-  assert(0);
-  return FALSE;
+void setst_rollback(banshee_rollback_info info) {
+  struct setst_rollback_info_ *saved = (struct setst_rollback_info_ *)info;
+  assert(info->kind == setst_sort);
+  /* engine rollback has already restored both UF links and bounds snapshots. */
+  for (struct setst_cache_undo *u = saved->caches; u; u = u->next)
+    u->term->proj_cache = u->previous;
+  setst_current_rollback = saved->previous;
+  invalidate_tlb_cache();
+  setst_var_list_scanner scan;
+  setst_var v;
+  setst_var_list_scan(setst_vars, &scan);
+  while (setst_var_list_next(&scan, &v)) {
+    st_set_seen(v, FALSE);
+    st_set_path_pos(v, 0);
+    st_set_src_sz(v, -1);
+    st_set_snk_sz(v, -1);
+  }
+  setst_changed = TRUE;
 }
 
-banshee_rollback_info setst_rollback_deserialize(FILE *f) {
-  assert(0);
-  return NULL;
-}
-
-bool setst_rollback_set_fields(banshee_rollback_info info) {
-  assert(0);
+bool setst_rollback_serialize(FILE *f, banshee_rollback_info obj) {
+  struct setst_rollback_info_ *i = (void *)obj;
+  unsigned count = 0;
+  for (struct setst_cache_undo *u=i->caches; u; u=u->next) ++count;
+  fwrite_s(&i->previous, sizeof(i->previous), 1, f);
+  serialize_banshee_object(i->previous, banshee_rollback_info);
+  fwrite_s(&count, sizeof(count), 1, f);
+  for (struct setst_cache_undo *u=i->caches; u; u=u->next) {
+    fwrite_s(&u->term, sizeof(u->term), 1, f);
+    fwrite_s(&u->previous, sizeof(u->previous), 1, f);
+    serialize_banshee_object(u->term, gen_e);
+    serialize_banshee_object(u->previous, list);
+  }
   return TRUE;
 }
-
-void setst_serialize(FILE *f) { return; }
-
-void setst_deserialize(FILE *f) { return; }
-void setst_set_fields(void) { return; }
+banshee_rollback_info setst_rollback_deserialize(FILE *f) {
+  struct setst_rollback_info_ *i = ralloc(setst_region, struct setst_rollback_info_);
+  unsigned count;
+  fread_s(&i->previous, sizeof(i->previous), 1, f);
+  fread_s(&count, sizeof(count), 1, f);
+  struct setst_cache_undo **tail=&i->caches;
+  while (count--) {
+    struct setst_cache_undo *u=ralloc(setst_region, struct setst_cache_undo);
+    fread_s(&u->term, sizeof(u->term), 1, f);
+    fread_s(&u->previous, sizeof(u->previous), 1, f);
+    *tail=u; tail=&u->next;
+  }
+  return (banshee_rollback_info)i;
+}
+bool setst_rollback_set_fields(banshee_rollback_info obj) {
+  struct setst_rollback_info_ *i=(void *)obj;
+  deserialize_set_obj((void **)&i->previous);
+  for (struct setst_cache_undo *u=i->caches; u; u=u->next) {
+    deserialize_set_obj((void **)&u->term);
+    deserialize_set_obj((void **)&u->previous);
+  }
+  return TRUE;
+}
+void setst_serialize(FILE *f) {
+  fwrite_s(&setst_current_rollback, sizeof(setst_current_rollback), 1, f);
+  fwrite_s(&setst_vars, sizeof(setst_vars), 1, f);
+  fwrite_s(&setst_hash, sizeof(setst_hash), 1, f);
+  serialize_banshee_object(setst_current_rollback, banshee_rollback_info);
+  serialize_banshee_object(setst_vars, list);
+  serialize_banshee_object(setst_hash, term_hash);
+}
+void setst_deserialize(FILE *f) {
+  invalidate_tlb_cache();
+  fread_s(&setst_current_rollback, sizeof(setst_current_rollback), 1, f);
+  fread_s(&setst_vars, sizeof(setst_vars), 1, f);
+  fread_s(&setst_hash, sizeof(setst_hash), 1, f);
+  setst_changed=TRUE;
+}
+void setst_set_fields(void) {
+  deserialize_set_obj((void **)&setst_current_rollback);
+  deserialize_set_obj((void **)&setst_vars);
+  deserialize_set_obj((void **)&setst_hash);
+}
+bool setst_expr_serialize(FILE *f, gen_e e) {
+  int type=((setst_term)e)->type;
+  fwrite_s(&((setst_term)e)->st, sizeof(stamp), 1, f);
+  if (type==CONSTANT_TYPE) return string_data_serialize(f, ((setst_constant_)e)->name);
+  gen_e_list exprs=((setst_inter_)e)->exprs;
+  fwrite_s(&exprs,sizeof(exprs),1,f);
+  serialize_banshee_object(exprs,list);
+  if(type==UNION_TYPE) {
+    gen_e_list cache=((setst_union_)e)->proj_cache;
+    fwrite_s(&cache,sizeof(cache),1,f);
+    serialize_banshee_object(cache,list);
+  }
+  return TRUE;
+}
+void *setst_expr_deserialize(FILE *f, int type) {
+  size_t size=type==CONSTANT_TYPE ? sizeof(struct setst_constant_) :
+              type==UNION_TYPE ? sizeof(struct setst_union_) : sizeof(struct setst_inter_);
+  gen_e e=(gen_e)rstralloc(setst_region,size);
+  ((setst_term)e)->type=type;
+  fread_s(&((setst_term)e)->st,sizeof(stamp),1,f);
+  if(type==CONSTANT_TYPE) {
+    char *name=string_data_deserialize(f);
+    ((setst_constant_)e)->name=rstrdup(setst_region,name); free(name);
+  } else {
+    fread_s(&((setst_inter_)e)->exprs,sizeof(gen_e_list),1,f);
+    if(type==UNION_TYPE) fread_s(&((setst_union_)e)->proj_cache,sizeof(gen_e_list),1,f);
+  }
+  return e;
+}
+bool setst_expr_set_fields(gen_e e) {
+  int type=((setst_term)e)->type;
+  if(type==UNION_TYPE) deserialize_set_obj((void **)&((setst_union_)e)->proj_cache);
+  if(type==UNION_TYPE || type==INTER_TYPE) deserialize_set_obj((void **)&((setst_inter_)e)->exprs);
+  return TRUE;
+}

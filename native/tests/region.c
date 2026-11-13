@@ -3,21 +3,27 @@
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
-#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include "regions.h"
+/* Only the child expected to call abort installs this handler. The parent
+ * still distinguishes a missing abort from the expected rejection. Exiting
+ * from the handler avoids systemd-coredump/desktop notifications entirely. */
+static void expected_abort(int signal_number) { _exit(100 + signal_number); }
 static void rejected(int multiply) {
   pid_t pid = fork(); assert(pid >= 0);
   if (!pid) {
-    struct rlimit limit = {0, 0}; setrlimit(RLIMIT_CORE, &limit);
+    struct sigaction action = {0};
+    action.sa_handler = expected_abort;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGABRT, &action, NULL)) _exit(99);
     region r = newregion();
     if (multiply) typed_rarrayalloc(r, SIZE_MAX / 2 + 1, 2, NULL);
     else rstralloc(r, (size_t)UINT32_MAX + 1);
     _exit(0);
   }
   int status; assert(waitpid(pid, &status, 0) == pid);
-  assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+  assert(WIFEXITED(status) && WEXITSTATUS(status) == 100 + SIGABRT);
 }
 int main(void) {
   assert(sizeof(void *) == 8 && sizeof(long) == 8);

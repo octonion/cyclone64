@@ -269,7 +269,7 @@ hash_table hash_table_copy(region r, hash_table ht) {
   for (i = 0; i < ht->size; i++) {
     prev = &result->table[i];
     scan_bucket(ht->table[i], cur) {
-      newbucket = ralloc(get_bucket_region(ht), struct bucket_);
+      newbucket = ralloc(get_bucket_region(result), struct bucket_);
       newbucket->key = cur->key;
       newbucket->data = cur->data;
       newbucket->next = NULL;
@@ -355,7 +355,7 @@ hash_table hash_table_map(region r, hash_table ht, hash_map_fn f, void *arg) {
   for (i = 0; i < ht->size; i++) {
     prev = &result->table[i];
     scan_bucket(ht->table[i], cur) {
-      newbucket = ralloc(get_bucket_region(ht), struct bucket_);
+      newbucket = ralloc(get_bucket_region(result), struct bucket_);
       newbucket->key = cur->key;
       newbucket->data = f(cur->key, cur->data, arg);
       newbucket->next = NULL;
@@ -480,34 +480,31 @@ void *hash_table_deserialize(FILE *f) {
 }
 
 bool hash_table_set_fields(void *obj) {
-  hash_table ht = (hash_table)obj;
-
-  unsigned long i;
-  bucket cur;
-  /*   bucket *oldtable = NULL, cur; */
-  /*   region oldregion; */
-  assert(ht);
-
-  deserialize_set_obj((void **)&ht->hash);
-  deserialize_set_obj((void **)&ht->cmp);
-
-  /*   oldtable = ht->table; */
-  /*   oldregion = ht->r; */
-  /*   ht->used = 0; */
-  /*   ht->r = permanent; */
-  /*   ht->table = rarrayalloc(ht->r, ht->size, bucket); */
-
-  /* Reinsert all the key/value pairs after they have been remapped */
-  if (ht->data_persist_kind) {
-    for (i = 0; i < ht->size; i++) {
-      scan_bucket(ht->table[i], cur) {
-        // deserialize_set_obj((void **)&cur->key);
-        deserialize_set_obj((void **)&cur->data);
-        // hash_table_insert(ht, cur->key, cur->data);
-      }
+  hash_table ht = obj;
+  bool ok = deserialize_set_obj((void **)&ht->hash);
+  ok &= deserialize_set_obj((void **)&ht->cmp);
+  if (!ok) return FALSE;
+  /* Pointer keys may hash to a new bucket after relocation. Detach every
+   * bucket before relinking, so no bucket is visited twice or lost. */
+  bucket entries = NULL;
+  for (unsigned long i = 0; i < ht->size; ++i) {
+    bucket cur = ht->table[i];
+    ht->table[i] = NULL;
+    while (cur) {
+      bucket next = cur->next;
+      cur->next = entries; entries = cur; cur = next;
     }
   }
-
+  while (entries) {
+    bucket cur = entries; entries = cur->next;
+    if (ht->key_persist_kind && cur->key)
+      ok &= deserialize_set_obj((void **)&cur->key);
+    if (ht->data_persist_kind && cur->data)
+      ok &= deserialize_set_obj((void **)&cur->data);
+    if (!ok) return FALSE;
+    bucket *slot = find_bucket(ht, cur->key);
+    cur->next = *slot; *slot = cur;
+  }
   return TRUE;
 }
 

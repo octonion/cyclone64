@@ -118,6 +118,10 @@ void serialize_start(FILE *f, serialize_fn_ptr kind_map[], int length);
 bool serialize_object(void *obj, int kind);
 void serialize_end(void);
 
+/* Returns false if a serializer reports failure; discard that file.
+ * Legacy fwrite_s hooks can still terminate on I/O errors. */
+bool serialize_finish(void);
+
 /* Deserialization */
 bool deserialize_all(FILE *f, deserialize_fn_ptr deserialize_obj[], set_fields_fn_ptr set_fields[],
                      int length);

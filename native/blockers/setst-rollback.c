@@ -1,4 +1,4 @@
-/* A regression that must fail until SetST rollback is implemented. */
+/* Historical blocker, now expected to pass. Extended coverage lives in tests/setst-rollback.c. */
 #include <stdio.h>
 #include "setst-sort.h"
 static void match(gen_e a, gen_e b) {}

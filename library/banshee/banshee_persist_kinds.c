@@ -104,14 +104,91 @@ bool term_hash_set_fields(void *obj);
 bool added_edge_info_set_fields(void *obj);
 bool added_ub_proj_info_set_fields(void *obj);
 
-/* TODO -- this is a temporary hack to get spec. code to compile */
+/* The specialized build has no sort tag in gen_e. Built-in expressions can
+ * be identified by their owning regions. Client-defined constructors require
+ * a client codec and are deliberately rejected rather than silently omitted.
+ * This format is a same-build checkpoint, not an interchange format. */
 #ifndef NONSPEC
-bool gen_e_serialize(FILE *f, void *obj) { return FALSE; }
-
-void *gen_e_deserialize(FILE *f) { return NULL; }
-
-bool gen_e_set_fields(void *obj) { return TRUE; }
-
+#include "setif-sort.h"
+#include "setst-sort.h"
+#include "term-sort.h"
+extern region term_var_region, term_constant_region;
+extern region setif_var_region, setif_union_region, setif_inter_region;
+extern region setif_constant_region, setif_term_region;
+static int builtin_sort(void *obj) {
+  if (obj == term_zero() || obj == term_one() || obj == term_wild()) return term_sort;
+  if (obj == setif_zero() || obj == setif_one() || obj == setif_wild()) return setif_sort;
+  if (obj == setst_zero() || obj == setst_one()) return setst_sort;
+  region r = regionof(obj);
+  if (r && (r == term_var_region || r == term_constant_region)) return term_sort;
+  if (r && (r == setif_var_region || r == setif_union_region || r == setif_inter_region ||
+            r == setif_constant_region || r == setif_term_region)) return setif_sort;
+  if (r && r == setst_region) return setst_sort;
+  return -1;
+}
+bool gen_e_serialize(FILE *f, void *obj) {
+  int sort = builtin_sort(obj), type = *(int *)obj;
+  if (sort < 0 || !(type == VAR_TYPE || type == ZERO_TYPE || type == ONE_TYPE ||
+      type == CONSTANT_TYPE || (type == WILD_TYPE && sort != setst_sort) ||
+      ((type == UNION_TYPE || type == INTER_TYPE) && sort != term_sort))) return FALSE;
+  fwrite_s(&sort, sizeof(sort), 1, f);
+  fwrite_s(&type, sizeof(type), 1, f);
+  if (type == ZERO_TYPE || type == ONE_TYPE || type == WILD_TYPE) return TRUE;
+  switch (sort) {
+    case term_sort: return type == VAR_TYPE ? term_var_serialize(f,obj) : term_constant_serialize(f,obj);
+    case setst_sort: return type == VAR_TYPE ? setst_var_serialize(f,obj) : setst_expr_serialize(f,obj);
+    case setif_sort:
+      switch(type) {
+        case VAR_TYPE: return setif_var_serialize(f,obj);
+        case UNION_TYPE: return setif_union_serialize(f,obj);
+        case INTER_TYPE: return setif_inter_serialize(f,obj);
+        default: return setif_constant_serialize(f,obj);
+      }
+  }
+  return FALSE;
+}
+void *gen_e_deserialize(FILE *f) {
+  int sort, type;
+  fread_s(&sort,sizeof(sort),1,f); fread_s(&type,sizeof(type),1,f);
+  switch(sort) {
+    case term_sort:
+      switch(type) {
+        case ZERO_TYPE: return term_zero(); case ONE_TYPE: return term_one();
+        case WILD_TYPE: return term_wild(); case VAR_TYPE: return term_var_deserialize(f);
+        case CONSTANT_TYPE: return term_constant_deserialize(f); default: return NULL;
+      }
+    case setif_sort:
+      switch(type) {
+        case ZERO_TYPE: return setif_zero(); case ONE_TYPE: return setif_one();
+        case WILD_TYPE: return setif_wild(); case VAR_TYPE: return setif_var_deserialize(f);
+        case CONSTANT_TYPE: return setif_constant_deserialize(f);
+        case UNION_TYPE: return setif_union_deserialize(f);
+        case INTER_TYPE: return setif_inter_deserialize(f); default: return NULL;
+      }
+    case setst_sort:
+      switch(type) {
+        case ZERO_TYPE: return setst_zero(); case ONE_TYPE: return setst_one();
+        case VAR_TYPE: return setst_var_deserialize(f);
+        case CONSTANT_TYPE: case UNION_TYPE: case INTER_TYPE: return setst_expr_deserialize(f,type);
+        default: return NULL;
+      }
+  }
+  return NULL;
+}
+bool gen_e_set_fields(void *obj) {
+  int sort = builtin_sort(obj), type = *(int *)obj;
+  switch(sort) {
+    case term_sort: return type == VAR_TYPE ? term_var_set_fields(obj) : TRUE;
+    case setst_sort: return type == VAR_TYPE ? setst_var_set_fields(obj) : setst_expr_set_fields(obj);
+    case setif_sort:
+      switch(type) {
+        case VAR_TYPE: return setif_var_set_fields(obj);
+        case UNION_TYPE: return setif_union_set_fields(obj);
+        case INTER_TYPE: return setif_inter_set_fields(obj); default: return TRUE;
+      }
+  }
+  return FALSE;
+}
 void serialize_cs(const char *filename, hash_table *entry_points, unsigned long sz) { return; }
 #endif /* NONSPEC */
 
@@ -143,10 +220,19 @@ static serialize_fn_ptr serialize_fns[NUM_PERSIST_KINDS] = {
 #endif
 };
 
+/* Graph strings have graph lifetime, unlike inline string_data_deserialize
+ * results whose ownership is transferred to their individual caller. */
+static void *graph_string_deserialize(FILE *f) {
+  char *text = string_data_deserialize(f);
+  char *result = rstrdup(permanent, text);
+  free(text);
+  return result;
+}
+
 static deserialize_fn_ptr deserialize_fns[NUM_PERSIST_KINDS] = {
     nonptr_data_deserialize,
     funptr_data_deserialize,
-    string_data_deserialize,
+    graph_string_deserialize,
     uf_element_deserialize,
     setif_var_deserialize,
     sv_info_deserialize,
@@ -202,6 +288,7 @@ static set_fields_fn_ptr set_fields_fns[NUM_PERSIST_KINDS] = {
 void banshee_serialize_start(FILE *f) { serialize_start(f, serialize_fns, NUM_PERSIST_KINDS); }
 
 void banshee_serialize_end() { serialize_end(); }
+bool banshee_serialize_finish(void) { return serialize_finish(); }
 
 void banshee_deserialize_all(FILE *f) {
   deserialize_all(f, deserialize_fns, set_fields_fns, NUM_PERSIST_KINDS);

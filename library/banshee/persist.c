@@ -122,22 +122,35 @@ bool serialize_object(void *obj, int kind) {
   return TRUE;
 }
 
-void serialize_end(void) {
+bool serialize_finish(void) {
+  bool success = TRUE;
   persist_entry next_entry;
   assert(current_state == persist_serializing);
 
   while (!persist_entry_queue_empty(serialize_queue)) {
     next_entry = persist_entry_queue_head(serialize_queue);
-    do_serialize_object(next_entry->obj, next_entry->kind);
+    if (!do_serialize_object(next_entry->obj, next_entry->kind)) {
+      success = FALSE;
+      break;
+    }
     persist_entry_queue_tail(serialize_queue);
   }
 
+  success &= !ferror(current_file);
   deleteregion(persist_rgn);
   num_kinds = 0;
   current_file = NULL;
   serialize_queue = NULL;
   persist_rgn = NULL;
   current_state = persist_raw;
+  return success;
+}
+
+void serialize_end(void) {
+  if (!serialize_finish()) {
+    fputs("Banshee: serialization failed (unsupported object or write error)\n", stderr);
+    exit(EXIT_FAILURE);
+  }
 }
 
 static bool create_objects(FILE *f, deserialize_fn_ptr deserialize_obj[], int length) {
@@ -212,6 +225,7 @@ void deserialize_end(void) {
   object_map = NULL;
   deleteregion(persist_rgn);
   current_state = persist_raw;
+  persist_rgn = NULL;
 }
 
 void *deserialize_get_obj(void *old_field) {

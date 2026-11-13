@@ -62,6 +62,13 @@ bounds bounds_create(region r) {
   return result;
 }
 
+bounds bounds_copy(region r, bounds source) {
+  bounds result = ralloc(r ? r : bounds_region, struct bounds_);
+  result->st = stamp_fresh();
+  result->table = hash_table_copy(r, source->table);
+  return result;
+}
+
 bounds bounds_persistent_create() { return bounds_create(NULL); }
 
 /* TODO */

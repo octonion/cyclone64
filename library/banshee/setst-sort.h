@@ -84,7 +84,13 @@ void setst_init(void);
 void setst_reset(void) deletes;
 void setst_print_stats(FILE *f);
 
+void setst_register_rollback(void);
 void setst_rollback(banshee_rollback_info info);
+
+/* Built-in expression payloads used by the generic object codec. */
+bool setst_expr_serialize(FILE *f, gen_e e);
+void *setst_expr_deserialize(FILE *f, int type);
+bool setst_expr_set_fields(gen_e e);
 
 /* Persistence */
 bool setst_rollback_serialize(FILE *F, banshee_rollback_info info);

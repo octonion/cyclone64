@@ -22,9 +22,14 @@ int main(void) {
   hash_table h = make_hash_table(r, 1, ptr_hash, ptr_eq);
   assert(hash_table_insert(h, (void *)(uintptr_t)0x100000001, &item));
   void *p; assert(hash_table_lookup(h, (void *)(uintptr_t)0x100000001, &p) && p == &item);
+  region destination=newregion();
+  hash_table cloned=hash_table_copy(destination,h);
+  deleteregion(r);
+  assert(hash_table_lookup(cloned,(void *)(uintptr_t)0x100000001,&p)&&p==&item);
+  deleteregion(destination);
   FILE *f = tmpfile(); assert(f);
   assert(string_data_serialize(f, "64-bit persistence")); rewind(f);
   char *copy = string_data_deserialize(f); assert(!strcmp(copy, "64-bit persistence"));
-  free(copy); fclose(f); deleteregion(r);
+  free(copy); fclose(f);
   puts("containers: integer payloads, narrow buffers, strings: PASS");
 }

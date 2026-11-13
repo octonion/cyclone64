@@ -124,6 +124,7 @@ bool term_var_serialize(FILE *f, void *obj) {
   assert(var);
 
   fwrite_s((void *)&var->st, sizeof(stamp), 1, f);
+  fwrite_s(&var->valid_pending, sizeof(var->valid_pending), 1, f);
   fwrite_s((void *)&var->pending, sizeof(bounds), 1, f);
   string_data_serialize(f, var->name);
   fwrite_s((void *)&var->elt, sizeof(tv_elt), 1, f);
@@ -141,10 +142,14 @@ void *term_var_deserialize(FILE *f) {
   assert(permanent);
 
   var = ralloc(term_var_region, struct term_var_);
+  var->type = VAR_TYPE;
 
   fread_s((void *)&var->st, sizeof(stamp), 1, f);
+  fread_s(&var->valid_pending, sizeof(var->valid_pending), 1, f);
   fread_s((void *)&var->pending, sizeof(bounds), 1, f);
-  var->name = (char *)string_data_deserialize(f);
+  char *restored_name = string_data_deserialize(f);
+  var->name = rstrdup(term_var_region, restored_name);
+  free(restored_name);
   fread_s((void *)&var->elt, sizeof(tv_elt), 1, f);
 
   return var;

@@ -225,8 +225,11 @@ bool sv_info_serialize(FILE *f, void *obj) {
   /*   fwrite_s((void *)&info->ubs, sizeof(bounds), 1, f); */
   /*   fwrite_s((void *)&info->ub_projs, sizeof(gen_e_list), 1, f); */
   /*   fwrite_s((void *)&info->component, sizeof(uf_element), 1, f); */
-  fwrite_s(&info->st, sizeof(stamp) + sizeof(bounds) * 2 + sizeof(gen_e_list) + sizeof(uf_element),
-           1, f);
+  fwrite_s(&info->st,sizeof(info->st),1,f);
+  fwrite_s(&info->lbs,sizeof(info->lbs),1,f);
+  fwrite_s(&info->ubs,sizeof(info->ubs),1,f);
+  fwrite_s(&info->ub_projs,sizeof(info->ub_projs),1,f);
+  fwrite_s(&info->component,sizeof(info->component),1,f);
 
   string_data_serialize(f, info->name);
 
@@ -248,10 +251,15 @@ void *sv_info_deserialize(FILE *f) {
   /*   fread_s((void *)&info->ubs, sizeof(bounds), 1, f); */
   /*   fread_s((void *)&info->ub_projs, sizeof(gen_e_list), 1, f); */
   /*   fread_s((void *)&info->component, sizeof(uf_element), 1, f); */
-  fread_s(&info->st, sizeof(stamp) + sizeof(bounds) * 2 + sizeof(gen_e_list) + sizeof(uf_element),
-          1, f);
+  fread_s(&info->st,sizeof(info->st),1,f);
+  fread_s(&info->lbs,sizeof(info->lbs),1,f);
+  fread_s(&info->ubs,sizeof(info->ubs),1,f);
+  fread_s(&info->ub_projs,sizeof(info->ub_projs),1,f);
+  fread_s(&info->component,sizeof(info->component),1,f);
 
-  info->name = string_data_deserialize(f);
+  char *restored_name = string_data_deserialize(f);
+  info->name = rstrdup(sv_info_region, restored_name);
+  free(restored_name);
 
   info->tlb_cache = NULL;
 

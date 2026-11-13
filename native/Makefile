@@ -63,3 +63,13 @@ $(BUILD)/cyclex64: $(filter-out $(BUILD)/cyclone/stage0/library/compiler/% $(BUI
 
 $(BUILD)/blocker-%: native/blockers/%.c $(BUILD)/libbanshee64.a
 	$(CC) -std=gnu11 $(ARCH) $(CPPFLAGS) $(CFLAGS) $(WARN) $< $(BUILD)/libbanshee64.a $(LDFLAGS) -o $@
+
+CYC_RUNTIME := $(filter-out $(BUILD)/cyclone/stage0/library/compiler/% $(BUILD)/cyclone/library/compiler/inference/%,$(CYC_COMMON))
+$(BUILD)/bison64: $(CYC_RUNTIME) $(patsubst %.c,$(BUILD)/cyclone/%.o,$(wildcard stage0/tools/bison/*.c)) $(BUILD)/config.o $(BUILD)/libbanshee64.a
+	$(CC) $(ARCH) $(CFLAGS) $^ $(LDFLAGS) -lbacktrace -ldl -lm -o $@
+
+$(BUILD)/check-constant-fold: native/compiler-checks/constant-fold.c $(CYC_COMMON) $(BUILD)/config.o $(BUILD)/libbanshee64.a
+	$(CC) -std=gnu11 $(ARCH) $(CPPFLAGS) $(CFLAGS) $(CYC_FLAGS) $< $(filter-out $(BUILD)/cyclone/stage0/library/compiler/assndef.o,$(filter %.o %.a,$^)) $(LDFLAGS) -lbacktrace -ldl -lm -o $@
+
+$(BUILD)/errorgen64: native/generated/errorgen.c $(CYC_RUNTIME)
+	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) $(CYC_FLAGS) $^ $(LDFLAGS) -lbacktrace -ldl -lm -o $@

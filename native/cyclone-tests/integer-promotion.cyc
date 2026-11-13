@@ -1,0 +1,12 @@
+#include "cyclone/library/std/core.h"
+using Core;
+extern "C" long abi_signed_long(void);
+extern "C" unsigned int abi_unsigned_int(void);
+int main(int argc, string_t ?argv) {
+  long s=abi_signed_long();
+  unsigned int u=abi_unsigned_int();
+  // On LP64, signed long represents every unsigned int value.
+  if (!(s < u)) return 1;
+  if (sizeof(s + u) != sizeof(long)) return 2;
+  return 0;
+}

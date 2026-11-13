@@ -434,6 +434,14 @@ static $(cnst_t, bool) eval_const_exp(exp_t e) {
           case $(&AppType(&IntCon(sn, sz), _), {.Short_c = $(sn2, x)}):
             fallthru(sn, sz, sn2, x);
           case $(&AppType(&IntCon(sn, sz), _), {.Int_c = $(sn2, x)}):
+            // Int_c cannot retain a wider C type. Keep the cast in the AST.
+            if (sz == Int128_sz) return $(ans[0], false);
+            if (sz == Long_sz || sz == LongLong_sz) {
+              long long value = sn2 == Unsigned ? (long long)(unsigned int)x : (long long)x;
+              // Report the value to constant-pattern checking without replacing
+              // the typed cast by an Int_c node in the executable AST.
+              return $(LongLong_c(sn, value), true);
+            }
             if (sn != sn2)
               ans[0] = Int_c(sn, x);
             break;

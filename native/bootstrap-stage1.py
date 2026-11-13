@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Build source-derived Cyclone stage1; retain individual commands and diagnostics."""
+import argparse, json, os, pathlib, subprocess, sys
+p=argparse.ArgumentParser()
+p.add_argument('--build',default='native/build')
+p.add_argument('--out',default='native/bootstrap/stage1')
+p.add_argument('--compiler',default=None)
+p.add_argument('--cc',default=os.environ.get('CC') or subprocess.check_output(['native/select-cc.sh'],text=True).strip())
+a=p.parse_args(); build=pathlib.Path(a.build); out=pathlib.Path(a.out); out.mkdir(parents=True,exist_ok=True)
+compiler=a.compiler or str(build/'cyclone64'); results=[]; objects=[]; commands=[]
+def run(cmd, log):
+    commands.append(list(map(str,cmd)))
+    with open(log,'w') as f:
+        try: q=subprocess.run(cmd,stdout=f,stderr=subprocess.STDOUT,timeout=90)
+        except subprocess.TimeoutExpired: return False
+    return q.returncode==0
+sources=sorted(pathlib.Path('library/compiler').glob('*.cyc'))+sorted(pathlib.Path('library/std').glob('*.cyc'))
+sources=[s for s in sources if not s.name.endswith('.err.cyc') and s.stem not in ('bansheeif_stub','rgnorder')]
+sources += [pathlib.Path(s) for s in ['native/generated/lex.cyc','native/generated/lineno.cyc','native/generated/cyclone/library/compiler/parse_tab.cyc','native/generated/libc/cycstubs.cyc','tools/cyclone/cyclone.cyc']]
+for src in sources:
+    dest=out/src.with_suffix('');dest.parent.mkdir(parents=True,exist_ok=True)
+    pre=str(dest)+'.cyp'; gen=str(dest)+'.c'; obj=str(dest)+'.o'
+    steps=[('preprocess',[a.cc,'-E','-x','c','-nostdinc','-Inative/generated','-Inative/include','-Inative/compat','-isystem','native/generated/libc',str(src),'-o',pre]),('translate',[compiler,'--cifc-inst-tvar','--better-widen','-o',gen,pre]),('compile',[a.cc,'-std=gnu11','-march=native','-O2','-g','-Wno-error=incompatible-pointer-types','-Ilibrary/std/cyc-lib','-c',gen,'-o',obj])]
+    for phase,cmd in steps:
+        if not run(cmd,str(dest)+'-'+phase+'.log'):
+            results.append(f'{src}: {phase} FAIL');break
+    else:
+        results.append(f'{src}: PASS');objects.append(obj)
+    print(results[-1],flush=True)
+for src in ['native/generated/libc/cstubs.c','library/std/boot_cstubs.c']:
+    obj=out/(pathlib.Path(src).stem+'.o')
+    ok=run([a.cc,'-std=gnu11','-O2','-g','-D_POSIX_C_SOURCE=200809L','-D_DEFAULT_SOURCE','-Ilibrary/std/cyc-lib','-c',src,'-o',str(obj)],str(obj)+'.log')
+    results.append(f'{src}: '+('PASS' if ok else 'compile FAIL'))
+    if ok: objects.append(str(obj))
+if all('PASS' in r for r in results):
+    support=sorted((build/'cyclone/library/runtime').glob('*.o'))+[build/'cyclone/library/compiler/inference/cycinf.o',build/'config.o',build/'libbanshee64.a']
+    ok=run([a.cc,'-march=native','-g',*objects,*map(str,support),'-lbacktrace','-ldl','-lm','-lpthread','-o',str(out/'cyclone64')],out/'link.log')
+    results.append('stage link: '+('PASS' if ok else 'FAIL'))
+(out/'commands.json').write_text(json.dumps(commands,indent=2)+'\n')
+(out/'results.txt').write_text('\n'.join(results)+'\n')
+sys.exit(any('PASS' not in r for r in results))

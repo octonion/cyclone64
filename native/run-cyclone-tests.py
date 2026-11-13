@@ -3,11 +3,16 @@
 import argparse, difflib, os, pathlib, subprocess, sys
 p = argparse.ArgumentParser()
 p.add_argument('--build', default='native/build')
+p.add_argument('--compiler', help='explicit translator; keep BUILD standard library/runtime objects')
+p.add_argument('--output', help='separate probe log directory')
+p.add_argument('--stage-dir', help='source-built stage directory with cyclone64 and standard library objects')
 p.add_argument('--cc', default=os.environ.get('CC') or subprocess.check_output(['native/select-cc.sh'], text=True).strip())
 p.add_argument('--cflags', default='-O2 -g')
 a = p.parse_args()
 build = pathlib.Path(a.build).resolve()
-out = build / 'probes'; out.mkdir(exist_ok=True)
+stage = pathlib.Path(a.stage_dir).resolve() if a.stage_dir else None
+compiler = pathlib.Path(a.compiler).resolve() if a.compiler else (stage or build) / 'cyclone64'
+out = pathlib.Path(a.output) if a.output else (stage or build) / 'probes'; out.mkdir(parents=True,exist_ok=True)
 include = pathlib.Path('native/include'); include.mkdir(exist_ok=True)
 if not (include / 'cyclone').exists(): (include / 'cyclone').symlink_to('../..')
 results = []
@@ -22,17 +27,19 @@ for ref in sorted(pathlib.Path('testsuite/compiler').glob('*.ref')):
     src = ref.with_suffix('.cyc'); pre = out / (src.stem + '.cyp')
     q = run([a.cc, '-nostdinc', '-x', 'c', '-E', '-isystem', 'testsuite/compiler/lib', src, '-o', pre], src.stem + '-cpp')
     if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue
-    q = run([build / 'cyclone64', '--manyerrors', pre, '-o', '/dev/null'], src.stem)
+    q = run([compiler, '--manyerrors', pre, '-o', '/dev/null'], src.stem)
     got = (q.stdout + q.stderr).replace('testsuite/compiler/', 'cyclone/testsuite/compiler/')
     expected = ref.read_text()
     (out / (src.stem + '.diff')).write_text(''.join(difflib.unified_diff(expected.splitlines(True), got.splitlines(True))))
     results.append((src.stem, 'PASS' if got == expected else f'DIFF (exit {q.returncode})'))
 objects = sorted((build / 'cyclone/stage0/library/std').rglob('*.o')) + sorted((build / 'cyclone/library/runtime').glob('*.o'))
+if stage:
+    objects = sorted((stage/'library/std').glob('*.o')) + [stage/'native/generated/lineno.o',stage/'native/generated/libc/cycstubs.o',stage/'cstubs.o',stage/'boot_cstubs.o'] + sorted((build/'cyclone/library/runtime').glob('*.o'))
 for src in sorted(pathlib.Path('native/cyclone-tests').glob('*.cyc')):
     pre = out / (src.stem + '.cyp'); generated = out / (src.stem + '.c')
     q = run([a.cc, '-E', '-x', 'c', '-Inative/include', src, '-o', pre], src.stem + '-cpp')
     if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue
-    q = run([build / 'cyclone64', '-o', generated, pre], src.stem + '-translate')
+    q = run([compiler, '-o', generated, pre], src.stem + '-translate')
     if q.returncode: results.append((src.stem, f'TRANSLATE FAIL ({q.returncode})')); continue
     q = run([a.cc, '-std=gnu11', *a.cflags.split(), '-Ilibrary/std/cyc-lib', generated, 'native/cyclone-tests/abi-helper.c', *objects, '-lbacktrace', '-ldl', '-lm', '-o', out / src.stem], src.stem + '-link')
     if q.returncode: results.append((src.stem, 'LINK FAIL')); continue

@@ -39,7 +39,7 @@ void array_test() {
   CT_ASSERT(0==array_cmp(intptr_t_cmp,z1,z2));
   Array::msort(intptr_cmp,z3,10);
   CT_ASSERT(0==array_cmp(intptr_t_cmp,z3,z2));
-  intptr_t x = 4;
+  int x = 4;
   intptr_t ?z4 = Array::map(add2,Array::extract(z2,2,&x));
   Array::imp_map(add2,z4);
   CT_ASSERT(0==array_cmp(intptr_t_cmp,z4,Array::extract(z2,6,NULL)));

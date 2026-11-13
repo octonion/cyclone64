@@ -61,7 +61,7 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <spawn.h>
-#include <stdarg.h>
+// C va_list is not exposed: Cyclone uses its own typed varargs.
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

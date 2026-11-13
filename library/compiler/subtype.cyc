@@ -224,7 +224,8 @@ static bool alias_qual_subtype(aqualtype_t aq_sub, aqualtype_t aq_sup, int mode)
 static bool isomorphic(type_t t1, type_t t2) {
   switch ($(compress(t1), compress(t2))) {
     case $(&AppType(&IntCon(_, b1), _), &AppType(&IntCon(_, b2), _)):
-      return b1 == b2 || (b1 == Int_sz && b2 == Long_sz) || (b1 == Long_sz && b2 == Int_sz);
+      return b1 == b2 || (sizeof(int) == sizeof(long) &&
+                         ((b1 == Int_sz && b2 == Long_sz) || (b1 == Long_sz && b2 == Int_sz)));
     default:
       return false;
   }

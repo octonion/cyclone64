@@ -1646,11 +1646,11 @@ static int tycon2int(tycon_t t) {
     case &IntCon(None, Int_sz):
       return 509;
     case &IntCon(Unsigned, Long_sz):
-      return 507;  // NB: treating long == int
+      return 510;  // long and int have distinct representations on LP64
     case &IntCon(Signed, Long_sz):
-      return 508;
+      return 511;
     case &IntCon(None, Long_sz):
-      return 509;
+      return 512;
     case &IntCon(Unsigned, LongLong_sz):
       return 513;
     case &IntCon(Signed, LongLong_sz):

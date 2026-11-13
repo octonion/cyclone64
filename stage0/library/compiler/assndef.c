@@ -1297,19 +1297,19 @@ Cyc_AssnDef_uint(_TF);return _T10;case Cyc_Absyn_Bitor: _T11= i | j;_T12=
 # 1616
 Cyc_AssnDef_uint(_T11);return _T12;case Cyc_Absyn_Bitxor: _T13= i ^ j;_T14= 
 # 1618
-Cyc_AssnDef_uint(_T13);return _T14;case Cyc_Absyn_Bitlshift: _T15= i << j;_T16= 
+Cyc_AssnDef_uint(_T13);return _T14;case Cyc_Absyn_Bitlshift: if(j>=32U)goto _LL7; _T15= i << j;_T16=
 # 1620
-Cyc_AssnDef_uint(_T15);return _T16;case Cyc_Absyn_Bitlrshift: _T17= i >> j;_T18= 
+Cyc_AssnDef_uint(_T15);return _T16;case Cyc_Absyn_Bitlrshift: if(j>=32U)goto _LL7; _T17= i >> j;_T18=
 # 1622
 Cyc_AssnDef_uint(_T17);return _T18;case Cyc_Absyn_Div:
 # 1624
- if(j==0U)goto _TL1BA;_T19= i;_T1A= (int)_T19;_T1B= j;_T1C= (int)_T1B;_T1D= _T1A / _T1C;_T1E= (unsigned)_T1D;_T1F= 
+ if(j==0U || (i==0x80000000U && j==0xffffffffU))goto _TL1BA;_T19= i;_T1A= (int)_T19;_T1B= j;_T1C= (int)_T1B;_T1D= _T1A / _T1C;_T1E= (unsigned)_T1D;_T1F=
 Cyc_AssnDef_uint(_T1E);return _T1F;_TL1BA: goto _LL7;case Cyc_Absyn_UDiv:
 # 1628
  if(j==0U)goto _TL1BC;_T20= i / j;_T21= 
 Cyc_AssnDef_uint(_T20);return _T21;_TL1BC: goto _LL7;case Cyc_Absyn_Mod:
 # 1632
- if(j==0U)goto _TL1BE;_T22= i;_T23= (int)_T22;_T24= j;_T25= (int)_T24;_T26= _T23 % _T25;_T27= (unsigned)_T26;_T28= 
+ if(j==0U || (i==0x80000000U && j==0xffffffffU))goto _TL1BE;_T22= i;_T23= (int)_T22;_T24= j;_T25= (int)_T24;_T26= _T23 % _T25;_T27= (unsigned)_T26;_T28=
 Cyc_AssnDef_uint(_T27);return _T28;_TL1BE: goto _LL7;case Cyc_Absyn_UMod:
 # 1636
  if(j==0U)goto _TL1C0;_T29= i % j;_T2A= 

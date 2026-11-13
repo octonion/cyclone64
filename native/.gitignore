@@ -9,3 +9,4 @@
 /compiler-tests/
 /logs/
 /__pycache__/
+/compiler-checks-build/

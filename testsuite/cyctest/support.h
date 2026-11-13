@@ -92,7 +92,7 @@ void pr_array(int ?x) {
   printf("|]\n");
 }
 
-int intptr_cmp(int @a, int @b) {
+int intptr_cmp(intptr_t @a, intptr_t @b) {
   if (*a == *b) return 0;
   if (*a < *b) return -1;
   return 1;
@@ -104,13 +104,13 @@ int int_cmp(int a, int b) {
   return 1;
 }
 
-intptr_t intptr_t_cmp(intptr_t a, intptr_t b) {
+int intptr_t_cmp(intptr_t a, intptr_t b) {
   if (a == b) return 0;
   if (a < b) return -1;
   return 1;
 }
 
 int my_add(int i, int j) { return i+j; }
-int add2(int i) { return i+2; }
+intptr_t add2(intptr_t i) { return i+2; }
 bool odd(int i) { return (1 == (i % 2)); }
 bool even(int i) { return (0 == (i % 2)); }

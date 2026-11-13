@@ -1564,7 +1564,7 @@ static int Cyc_Tcutil_tycon2int(void*t){void*_T0;int*_T1;unsigned _T2;void*_T3;s
 # 1643
  return 507;case Cyc_Absyn_Long_sz:
 # 1649
- return 507;case Cyc_Absyn_LongLong_sz:
+ return 510;case Cyc_Absyn_LongLong_sz:
 # 1655
  return 513;case Cyc_Absyn_Int128_sz:
 # 1667
@@ -1576,7 +1576,7 @@ static int Cyc_Tcutil_tycon2int(void*t){void*_T0;int*_T1;unsigned _T2;void*_T3;s
 # 1645
  return 508;case Cyc_Absyn_Long_sz:
 # 1651
- return 508;case Cyc_Absyn_LongLong_sz:
+ return 511;case Cyc_Absyn_LongLong_sz:
 # 1657
  return 514;case Cyc_Absyn_Int128_sz:
 # 1669
@@ -1588,7 +1588,7 @@ static int Cyc_Tcutil_tycon2int(void*t){void*_T0;int*_T1;unsigned _T2;void*_T3;s
 # 1647
  return 509;case Cyc_Absyn_Long_sz:
 # 1653
- return 509;case Cyc_Absyn_LongLong_sz:
+ return 512;case Cyc_Absyn_LongLong_sz:
 # 1659
  return 515;case Cyc_Absyn_Int128_sz:
 # 1671

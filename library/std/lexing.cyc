@@ -122,7 +122,7 @@ static void set_eof(Lexbuf lbuf) { lbuf->lex_eof_reached = true; }
 
 Lexbuf<long> from_string(mstring_t s) {
   return new lexbuf(set_eof,
-                    0,          // ignored but can't instantiate with void
+                    (long)0,    // ignored but preserve Lexbuf<long> on LP64
                     strdup(s),  // copy to keep lexer shielded from updates
                     numelts(s), 0, 0, 0, 0, 0, true);
 }

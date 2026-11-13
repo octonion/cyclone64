@@ -38,10 +38,10 @@ static `a::A *err_null(seg_t loc, string_t fmt, ... inject parg_t ap)
 }
 
 struct ConversionSpecification<`r> {
-  list_t<int, `r> flags;
-  list_t<int, `r> width;
-  list_t<int, `r> precision;
-  list_t<int, `r> lenmod;
+  list_t<intptr_t, `r> flags;
+  list_t<intptr_t, `r> width;
+  list_t<intptr_t, `r> precision;
+  list_t<intptr_t, `r> lenmod;
   char c;
   int j;
 };
@@ -74,7 +74,7 @@ static struct ConversionSpecification<`r> *`r parse_conversion_specification(reg
       case ' ':
       case '#':
       case '0':
-        flags = rnew(r) List((int)c, flags);
+        flags = rnew(r) List((intptr_t)c, flags);
         continue;
       default:
         break;
@@ -89,13 +89,13 @@ static struct ConversionSpecification<`r> *`r parse_conversion_specification(reg
   let width = NULL;
   c         = s[i];  // redundant
   if (c == '*') {
-    width = rnew(r) List((int)c, width);
+    width = rnew(r) List((intptr_t)c, width);
     i++;
   } else
     for (; i < len; i++) {
       c = s[i];
       if (isdigit(c))
-        width = rnew(r) List((int)c, width);
+        width = rnew(r) List((intptr_t)c, width);
       else
         break;
     }
@@ -107,18 +107,18 @@ static struct ConversionSpecification<`r> *`r parse_conversion_specification(reg
   let precision = NULL;
   c             = s[i];  // not redundant
   if (c == '.') {
-    precision = rnew(r) List((int)c, precision);
+    precision = rnew(r) List((intptr_t)c, precision);
     if (++i >= len)
       return NULL;
     c = s[i];
     if (c == '*') {
-      precision = rnew(r) List((int)c, precision);
+      precision = rnew(r) List((intptr_t)c, precision);
       i++;
     } else
       for (; i < len; i++) {
         c = s[i];
         if (isdigit(c))
-          precision = rnew(r) List((int)c, precision);
+          precision = rnew(r) List((intptr_t)c, precision);
         else
           break;
       }
@@ -133,22 +133,22 @@ static struct ConversionSpecification<`r> *`r parse_conversion_specification(reg
   c          = s[i];  // not redundant
   switch (c) {
     case 'h':
-      lenmod = rnew(r) List((int)c, lenmod);
+      lenmod = rnew(r) List((intptr_t)c, lenmod);
       if (++i >= len)
         return NULL;
       c = s[i];
       if (c == 'h') {
-        lenmod = rnew(r) List((int)c, lenmod);
+        lenmod = rnew(r) List((intptr_t)c, lenmod);
         i++;
       }
       break;
     case 'l':
-      lenmod = rnew(r) List((int)c, lenmod);
+      lenmod = rnew(r) List((intptr_t)c, lenmod);
       if (++i >= len)
         return NULL;
       c = s[i];
       if (c == 'l') {
-        lenmod = rnew(r) List((int)c, lenmod);
+        lenmod = rnew(r) List((intptr_t)c, lenmod);
         i++;
       }
       break;
@@ -156,7 +156,7 @@ static struct ConversionSpecification<`r> *`r parse_conversion_specification(reg
     case 'z':
     case 't':
     case 'L':
-      lenmod = rnew(r) List((int)c, lenmod);
+      lenmod = rnew(r) List((intptr_t)c, lenmod);
       i++;
       break;
     default:
@@ -420,8 +420,8 @@ get_format_types(Tcenv::tenv_t te, string_t s, bool isCproto, seg_t loc) {
 
 struct InputFormat<`r> {
   bool suppress;
-  list_t<int, `r> width;
-  list_t<int, `r> lenmod;
+  list_t<intptr_t, `r> width;
+  list_t<intptr_t, `r> lenmod;
   char c;
   int j;
 };
@@ -453,7 +453,7 @@ static input_format_t<`r> parse_input_format(region_t<`r> r, string_t s, int i) 
   for (; i < len; i++) {
     c = s[i];
     if (isdigit(c))
-      width = rnew(r) List((int)c, width);
+      width = rnew(r) List((intptr_t)c, width);
     else
       break;
   }
@@ -467,24 +467,24 @@ static input_format_t<`r> parse_input_format(region_t<`r> r, string_t s, int i) 
   c          = s[i];  // not redundant
   switch (c) {
     case 'h':
-      lenmod = rnew(r) List((int)c, lenmod);
+      lenmod = rnew(r) List((intptr_t)c, lenmod);
       i++;
       if (i >= len)
         return NULL;
       c = s[i];
       if (c == 'h') {
-        lenmod = rnew(r) List((int)c, lenmod);
+        lenmod = rnew(r) List((intptr_t)c, lenmod);
         i++;
       }
       break;
     case 'l':
-      lenmod = rnew(r) List((int)c, lenmod);
+      lenmod = rnew(r) List((intptr_t)c, lenmod);
       i++;
       if (i >= len)
         return NULL;
       c = s[i];
       if (c == 'l') {
-        lenmod = rnew(r) List((int)c, lenmod);
+        lenmod = rnew(r) List((intptr_t)c, lenmod);
         i++;
       }
       break;
@@ -492,7 +492,7 @@ static input_format_t<`r> parse_input_format(region_t<`r> r, string_t s, int i) 
     case 'z':
     case 't':
     case 'L':
-      lenmod = rnew(r) List((int)c, lenmod);
+      lenmod = rnew(r) List((intptr_t)c, lenmod);
       i++;
       break;
     default:

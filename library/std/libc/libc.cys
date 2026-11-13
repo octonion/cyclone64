@@ -2513,7 +2513,7 @@ cycstub sigaction {
   }
   int sigaction(int sig, struct sigaction const *act,
 		struct sigaction *oact)
-    __attribute__((no_throw))
+    __attribute__((no_throw,leaf))
   {
     if (act != NULL) Csignal::sigaction_unwrap(act);
     int ret = Csignal::sigaction(sig,act,oact);

@@ -1617,11 +1617,13 @@ term_t binop(Absyn::primop_t p, term_t t1, term_t t2, type_opt_t tp) {
         case Absyn::Bitxor:
           return uint(i ^ j);
         case Absyn::Bitlshift:
-          return uint(i << j);
+          if (j < 32) return uint(i << j);
+          break;
         case Absyn::Bitlrshift:
-          return uint(i >> j);
+          if (j < 32) return uint(i >> j);
+          break;
         case Absyn::Div:
-          if (j != 0)
+          if (j != 0 && !(i == 0x80000000U && j == 0xffffffffU))
             return uint((int)i / (int)j);
           break;
         case Absyn::UDiv:
@@ -1629,7 +1631,7 @@ term_t binop(Absyn::primop_t p, term_t t1, term_t t2, type_opt_t tp) {
             return uint(i / j);
           break;
         case Absyn::Mod:
-          if (j != 0)
+          if (j != 0 && !(i == 0x80000000U && j == 0xffffffffU))
             return uint((int)i % (int)j);
           break;
         case Absyn::UMod:

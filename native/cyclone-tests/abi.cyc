@@ -1,11 +1,12 @@
 #include "cyclone/library/std/core.h"
 using Core;
 extern "C" unsigned long abi_echo(unsigned long);
+extern "C" unsigned long abi_high_value(void);
 int main(int argc, string_t ?argv) {
   if (argc < 1 || argv[0][0] == 0) return 1;
   if (sizeof(int) != 4 || sizeof(long) != 8 || sizeof(void *) != 8) return 2;
   unsigned long high = (((unsigned long)0x12345678U << 32) | 0x9abcdef0U);
-  if (abi_echo(high) != high) return 3;
+  if (high != abi_high_value() || abi_echo(high) != high) return 3;
   region r;
   int @ p = rnew(r) 123;
   unsigned long address = (unsigned long)p;

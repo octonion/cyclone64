@@ -1,31 +1,19 @@
 # Native LP64 work on seymour
 
-Experimental port based on `c19c449365671fa10acad6307a95ffffae86dc69`.
-The independent Banshee archive passes the scoped tests below. Cyclone stage0
-runs, but the complete native conversion and self-hosting bootstrap are not
-finished. No prior LP64 kit was used: `/mnt/data` did not exist on this machine.
+Experimental conversion of TokTok/cyclone, based on
+`c19c449365671fa10acad6307a95ffffae86dc69`, isolated on `native-lp64-seymour`.
+No prior LP64 kit was used: `/mnt/data` did not exist on this workstation.
 
-Run commands from the repository root. No Bazel workspace, system installation,
-or modification of another checkout is required.
+Banshee's scoped native tests pass. Source-built native Cyclone stages now link,
+but language/runtime regressions below prevent calling this a solid conversion.
+In particular, successful self-compilation does not establish correct LP64 semantics.
 
-```sh
-make -f native/Makefile -j16 check rlib-check
-make -f native/Makefile -j16 cyclone
-native/run-cyclone-tests.py
-```
+## Independent Banshee build
 
-The last command currently returns failure for documented compiler regressions.
-It retains preprocessed inputs, generated C, diagnostics, diffs, and runtime
-results under `native/build/probes/`. It does not rewrite upstream references.
-
-## Toolchain and reproduction
-
-The Makefile chooses the highest installed non-prerelease versioned GCC, with
-`-march=native` on Ryzen. `CC`, `AR`, `ARCH`, `CPPFLAGS`, `CFLAGS`, `LDFLAGS`, and
-`BUILD` can be overridden. Use a **new BUILD directory when changing flags or
-compilers**, since Make does not track command-line changes in existing objects.
+Run from the repository root:
 
 ```sh
+make -f native/Makefile -j12 check rlib-check
 make -f native/Makefile BUILD=native/gcc14 CC=gcc-14 check
 make -f native/Makefile BUILD=native/clang CC=clang check
 make -f native/Makefile BUILD=native/asan \
@@ -33,99 +21,144 @@ make -f native/Makefile BUILD=native/asan \
   check rlib-check
 ```
 
-LeakSanitizer needs process inspection permission outside the desktop sandbox.
-Do not disable leak checks to turn a failing run into a pass. The explicit
-compiler override takes precedence. Intel family 6/model 87 selects GCC 14 and
-`-march=knl` when available; a newer compiler on KNL defaults to portable
-`-march=x86-64`. The KNL path is untested on hardware.
+The result is `native/build/libbanshee64.a`, independent of Cyclone. Clients use
+`library/banshee` and `library/banshee/rlib` headers with the annotation definitions
+in the Makefile. `native/tests` contains seven standalone client programs.
 
-`native/build/libbanshee64.a` is independent of Cyclone. Clients need the headers
-in `library/banshee` and `library/banshee/rlib`, and the annotation definitions
-used by the Makefile. The five C tests are standalone client examples. Objects
-are archived deterministically (`ar rcsD`). A forced rebuild in the same directory
-produced the same SHA-256; this is not a claim of cross-toolchain reproducibility.
+The Makefile chooses the highest installed non-prerelease versioned GCC and
+`-march=native` on Ryzen. `CC`, `AR`, `ARCH`, `CPPFLAGS`, `CFLAGS`, `LDFLAGS`, and
+`BUILD` accept explicit overrides. **Use a fresh BUILD directory when changing
+flags or compilers.** Intel family 6/model 87 chooses GCC 14/`-march=knl` if
+available; newer GCC on that CPU defaults to portable x86-64. The KNL path has
+not been tested on hardware.
 
-## Changes and verification
+Verified here: Ryzen 9 5950X, Ubuntu 26.04.1, GCC 15.2, GCC 14.3, Clang 21.1.8.
+All seven tests pass with those compilers, GCC ASan/UBSan with leak detection,
+and `NMEMDEBUG`. All eight upstream region persistence drivers pass under
+ASan/UBSan, including six million linked nodes. The archive is deterministic
+under a forced same-directory rebuild; no cross-toolchain claim is made.
 
-* Sparse, full-uintptr page maps replace fixed 32-bit ownership/translation arrays.
-  Freed pages lose ownership even with `NMEMDEBUG` enabled.
-* Alignment masks retain upper address bits. Size multiplication and narrowing
-  are checked; big allocations reserve their one-past-end address.
-* Integer hash payloads and non-pointer list scanners/array conversions no longer
-  write pointer-sized values into four-byte integers. One-bucket hashing avoids
-  a shift by the word width. String serialization writes a correctly sized length.
-* Rollback kind checks compare rather than assign. Region restore updates the
-  active allocation base and closes descriptors on open failures.
-* The runtime declares/calls `Cyc_main` using the generated `_fat_ptr` argument ABI.
+The allocator's two expected-abort checks install a **child-only SIGABRT handler**
+that exits with a distinguished status. The parent still verifies rejection;
+missing aborts and other signals fail. No system crash-report settings are
+changed, and unexpected failures remain visible. Desktop crash records remained
+at 28 throughout the follow-up verification.
 
-Verified on Ryzen 9 5950X, Ubuntu 26.04.1: GCC 15.2, GCC 14.3, Clang 21.1.8.
-All five new Banshee tests pass with each compiler and with GCC ASan/UBSan.
-All eight upstream region persistence drivers pass with GCC 15 and ASan/UBSan,
-including six million linked nodes and large arrays. The `NMEMDEBUG` build passes
-all five new tests. Tests exercise high address bits, allocation/reuse/overflow,
-integer payloads, union-find, term unification, setif rollback, setst propagation,
-region graph relocation, and object graph persistence of union-find classes.
-These tests do not constitute coverage of every solver operation.
+## Banshee changes and scope
 
-## Remaining blockers and limits
+* Sparse full-uintptr ownership/translation maps, pointer-width alignment masks,
+  checked multiplication/narrowing, big-allocation one-past-end reservation,
+  and ownership removal on free even with `NMEMDEBUG`.
+* Correct pointer-sized container payload handling; no writes through int-sized
+  output buffers. Hash copies allocate buckets in their destination region.
+* SetST bounds use snapshots through union-find history. Tests cover nested
+  rollback, cyclic variable merging/splitting, branch reuse, sinks, intersections,
+  and projection caches. The old blocker program now passes.
+* Built-in term, SetIF, and SetST object codecs replace the specialized build's
+  empty generic-expression codec. SetST state/history is persisted. LP64 record
+  fields are written individually where packed-size assumptions dropped padding
+  and pointer bytes. Restored strings have region ownership; pointer-valued hash
+  keys are relocated and rehashed. Term hash-consing state is also restored.
+* The checkpoint test relocates all three sorts twice, discards original solver
+  regions before the second restore, verifies shared identities and pointer-key
+  lookup, then checks propagation and rollback after restoration.
+* `banshee_serialize_finish()` reports codec failure so unsupported client
+  expressions cannot silently produce a successful checkpoint. Discard failed
+  output. The legacy void finish exits unsuccessfully on codec failure; legacy
+  `fwrite_s` hooks can still terminate on I/O errors.
 
-1. **SetST rollback is absent upstream.** The public backtrack operation leaves
-   SetST constraints in place; `setst_rollback` and its persistence hooks are stubs.
-   Reproduce the behavioral failure (exit 1):
-   `make -f native/Makefile native/build/blocker-setst-rollback && native/build/blocker-setst-rollback`.
-2. **Full solver object persistence is incomplete.** In the default specialized
-   build, `gen_e_serialize` returns false, `gen_e_deserialize` returns NULL, and
-   SetST serialization does nothing. The passing tests cover region snapshots and
-   supported union-find object graphs, not a full solver checkpoint.
-3. **Cyclone integer semantics still assume ILP32.** `long-literal.cyc` rejects
-   `0x123456789abcdef0UL`. In `lex.cyl:intconst`, the constant representation and
-   suffix handling collapse long into 32-bit Int_c. ASan/UBSan additionally reports
-   a shift by 32 on `unsigned int` in generated `Cyc_AssnDef_binop`; the source
-   constant folder in `assndef.cyc` uses 32-bit Uint terms. Simply widening one
-   cast does not repair the type/kind, constant-folding, and proof semantics.
-4. **Stage1 is partial.** 37 of 41 hand-written compiler modules preprocess,
-   translate, and compile to native C objects. `absynpp`, `bansheeif`, and `currgn`
-   stop at the generated assert.h error; `parse_errors` needs generated parser and
-   error-table headers. Generated lexer compilation, parser/error-table generation, rebuilt standard library, final
-   stage1 linking, stage2 comparison, and the full regression suite remain undone.
-5. **Cyclone sanitizers are not clean.** Besides the shift error, the selected
-   upstream `nogc.c` runtime produces LeakSanitizer failures. The native ABI probe
-   passes without sanitizers; it does not waive these failures. Generated C still
-   has pointer-width and callback-type diagnostics. Only its callback incompatibility
-   diagnostic is downgraded from error to warning for bootstrap compilation.
-6. **No 32-bit reference:** `gcc-15 -m32` cannot link because Scrt1.o, crti.o, and
-   32-bit libgcc are unavailable. No 32/64 differential claim is made.
-7. **Allocator/persistence scope:** allocation alignment is pointer-word alignment;
-   over-aligned objects are unsupported. Individual requests above roughly 2 GiB
-   fail explicitly while page/snapshot sizes remain int. Snapshots are raw native
-   layout, same-ABI trusted files, without format versioning or malformed-input
-   validation. Neither 32-bit snapshot migration nor cross-build function-ID
-   compatibility is established. Legacy callback casts in generic containers and
-   generated function tables need a wider C-ABI audit.
+Persistence is **same-build, same-ABI, trusted-input** checkpointing. Built-in
+expression sort detection uses owning regions; arbitrary client constructors and
+flowrow expressions need their own codec. The old `serialize_cs` convenience
+function remains a stub: use the module/object API illustrated by
+`native/tests/solver-persistence.c`. Cross-ABI snapshots, malformed-input handling,
+and cross-build function-ID compatibility are not established. Region allocation
+is pointer-word aligned, not over-aligned; individual allocations remain capped
+near 2 GiB. Passing these tests is not exhaustive verification of the solver.
 
-Six of eight compiler diagnostic references match exactly after path normalization.
-`fail3` differs by one source column; `zeroptr` retains the expected compiler
-exception but reports the current source line (1777 vs 1732). Neither reference
-was updated to hide the difference. The native cyclex executable also generated the compiler lexer (209 states).
-The native ABI probe checks 8-byte long/pointer,
-4-byte int, high addresses, C calls, argv, and region array bounds/length.
-
-## Partial bootstrap reproduction
+## Cyclone reproduction
 
 ```sh
-make -f native/Makefile -j16 native/build/buildlib64
-mkdir -p native/generated/libc native/include
-# The include alias is also created by run-cyclone-tests.py.
-ln -s ../.. native/include/cyclone  # only if absent
-native/build/buildlib64 -cc gcc-15 -d native/generated/libc \
-  -log native/generated/libc/buildlib.log \
-  -cstubs native/generated/libc/cstubs.c \
-  -cycstubs native/generated/libc/cycstubs.cyc library/std/libc/libc.cys
-native/bootstrap-check.py
+native/prepare-bootstrap.sh > native/logs/prepare-bootstrap.log 2>&1
+native/bootstrap-stage1.py --out native/bootstrap/lp64-final-stage1
+native/bootstrap-stage1.py \
+  --compiler native/bootstrap/lp64-final-stage1/cyclone64 \
+  --out native/bootstrap/lp64-final-stage2
+native/bootstrap-stage1.py \
+  --compiler native/bootstrap/lp64-final-stage2/cyclone64 \
+  --out native/bootstrap/lp64-final-stage3
+native/run-cyclone-tests.py --stage-dir native/bootstrap/lp64-final-stage2
+native/run-cyctest.py --stage-dir native/bootstrap/lp64-final-stage1
 ```
 
-The binding generator exits successfully while recording unsupported assert.h
-and stdarg.h, so its exit status alone is insufficient. The bootstrap checker
-returns nonzero for unresolved modules and preserves the logs in `native/bootstrap`.
-Next work should address integer semantics and generated bindings, implement SetST
-rollback/full persistence, then complete and compare the compiler stages.
+Generation, translation, compilation, linking, commands, and diagnostics stay
+under `native/`. The two test runners deliberately return failure for the
+unresolved regressions; they never rewrite upstream reference outputs.
+The upstream library suite runs under GDB so an unexpected fatal signal can be
+examined without creating a desktop crash report. SIGUSR1/SIGUSR2 are passed
+through for the suite's signal tests.
+
+Native buildlib, cyclex, Bison, and errorgen produce libc wrappers, both lexers,
+and parser/error headers. All 41 hand-written compiler modules, 35 standard
+library modules, five generated/tool modules, and two C support files compile;
+the native stage1, stage2, and stage3 compilers link. The binding generator still reports
+unsupported `assert.h` and `stdarg.h`: assert is supplied by the existing Cyclone
+implementation via `native/compat/assert.h`; unused C `va_list` inclusion was
+removed from the aggregate library module. The sigaction wrapper now matches
+the host declaration's leaf attribute.
+
+The runtime calls `Cyc_main` with the actual generated `_fat_ptr` ABI. Compiler
+fixes keep int/long type identities distinct, preserve wide casts during constant
+evaluation, and prevent the proof-term folder from executing shifts >=32 or
+INT_MIN/-1 division/remainder. Source and checked-in stage0 C are patched together.
+The strengthened ABI test checks its 64-bit result against an independent C
+constant, in addition to sizes, high addresses, argv, calls, and region arrays.
+It passes both normally and with ASan/UBSan-instrumented generated C/runtime.
+The direct constant-folder boundary test also passes under ASan/UBSan.
+
+To reproduce runtime instrumentation independently of compiler leak failures:
+
+```sh
+make -f native/Makefile BUILD=native/asan \
+  CFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all' cyclone
+native/run-cyclone-tests.py --build native/asan \
+  --compiler native/bootstrap/lp64-final-stage1/cyclone64 \
+  --output native/asan/runtime-final-probes \
+  --cflags '-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all'
+```
+
+## Remaining Cyclone blockers
+
+1. **Large unsigned-long literals:** stage0 rejects `0x123456789abcdef0UL`;
+   source-built stages accept it but emit only `2596069104U`, losing the upper
+   bits. `native/cyclone-tests/long-literal.cyc` returns 3 with stage1/stage2.
+   `lex.cyl:intconst` and the constant AST still lack a faithful LP64 long model.
+2. **Bounds/index narrowing:** `bounds64.cyc` passes `0x100000001UL` as an index
+   into three elements. Generated C converts it to int before
+   `_check_fat_subscript`, accessing element 1 instead of throwing. It returns 1.
+   The index conversion and runtime overflow/bounds arithmetic need a coordinated
+   fix, not merely a wider literal parser.
+3. **Arithmetic promotions:** `integer-promotion.cyc` demonstrates signed long -1
+   compared with unsigned int 1 incorrectly. `tcutil.cyc:max_arithmetic_type`,
+   precision checks, and the proof/range machinery retain ILP32 assumptions.
+4. **Generic aggregate ABI:** the upstream suite's Fn currying assertion
+   `apply(apply(addc,1),2) == 3` fails with both stage0 and rebuilt stage1 libraries.
+   Generic tuples use pointer-sized fields while concrete `(int,int)` tuples use
+   four-byte fields. Boxing/layout and erased callback ABI need further work.
+   The suite reaches the remaining suites; one Fn assertion is reported failed.
+5. **Compiler LeakSanitizer:** upstream `nogc.c` does not reclaim ordinary GC
+   allocations. A sanitized compiler run of the ABI input reports leaks (for
+   example 653282 bytes/17876 allocations before the final type changes).
+   Leak detection has not been disabled to manufacture a passing result.
+6. **Bootstrap convergence and remaining diagnostics:** stage1 versus stage2 has
+   46/81 byte-identical generated C files; many differences replace `_throw` with
+   `_rethrow`. Stage2 versus stage3 converges: **81/81 generated C files are
+   byte-identical**. Six of eight upstream diagnostic references match; `fail3` differs by
+   a column and `zeroptr` retains its reference's expected compiler exception with
+   a changed source line. Pointer-width and callback warnings remain under audit.
+7. **No working 32-bit reference:** missing Scrt1.o, crti.o, and 32-bit libgcc
+   prevent `gcc-15 -m32` linking. No 32/64 behavioral equivalence is claimed.
+
+Do not infer correctness from the bootstrap or the ABI smoke test alone. The
+failing language cases above are retained as executable regressions for the next
+iteration.

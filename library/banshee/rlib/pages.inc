@@ -117,7 +117,7 @@ static void addbyaddress(struct page *p) {
      reaches a steady state of memory usage). */
 
   for (address_scan = pages_byaddress.next_address;; address_scan = address_scan->next_address)
-    if (p < address_scan || address_scan == &pages_byaddress) {
+    if ((uintptr_t)p < (uintptr_t)address_scan || address_scan == &pages_byaddress) {
       insertbefore_address(p, address_scan);
       return;
     }
@@ -146,7 +146,9 @@ void unlink_page(struct page **list, struct page *p)
 }
 
 void *region_get_mem(size_t s) {
+  if (s > SIZE_MAX - (RPAGESIZE - 1)) return NULL;
   void *mem = malloc(s + RPAGESIZE - 1);
+  if (!mem) return NULL;
 
   return (void *)ALIGN((__rcintptr)mem, RPAGESIZE);
 }
@@ -154,31 +156,27 @@ void *region_get_mem(size_t s) {
 /* Page to region map management */
 /* ----------------------------- */
 
-#if defined(__GNUC__) && defined(sparc)
-regionid __rcregionmaparray[MAXPAGE];
-#else
-regionid __rcregionmap[MAXPAGE];
-#endif
+#include "pagemap.h"
+static struct page_map region_map;
 
+static region page_region(pageid pagenb) {
+  region r = page_map_get(&region_map, pagenb);
+  return r ? r : &zeroregion;
+}
+regionid regionidof(const void *ptr) {
+  region r = page_region(PAGENB(ptr));
 #ifdef RCPAIRS_ARRAY
-
-static void set_page_region(pageid pagenb, region r) { __rcregionmap[pagenb] = r->id; }
-
-#define page_region(pagenb) (__rcregions[__rcregionmap[(pagenb)]])
-
+  return r->id;
 #else
-
-static void set_page_region(pageid pagenb, region r) {
-#ifdef DUPLICATES
-  __rcregionmap[pagenb] = r->base;
-#else
-  __rcregionmap[pagenb] = r;
+  return r;
 #endif
 }
-
-#define page_region(pagenb) (__rcregionmap[(pagenb)])
-
+static void set_page_region(pageid pagenb, region r) {
+#ifdef DUPLICATES
+  r = r->base;
 #endif
+  page_map_set(&region_map, pagenb, r == &zeroregion ? NULL : r);
+}
 
 void set_region(struct page *p, int npages, region r) {
   pageid pnb = PAGENB(p);
@@ -202,7 +200,7 @@ void set_region_range(void *from, void *to, region r) {
 struct page *alloc_new(int n, struct page *next)
 /* Assumes freepages_lock held */
 {
-  struct page *newp = region_get_mem(n << RPAGELOG);
+  struct page *newp = region_get_mem((size_t)n << RPAGELOG);
 
   if (!newp) {
     if (nomem_h)
@@ -323,9 +321,9 @@ void free_pages(region r, struct page *p)
 
   for (i = pnb; i < pnb + p->pagecount; i++) {
     assert(page_region(i) == r);
-    set_page_region(i, FREEPAGE);
   }
 #endif
+  set_region(p, p->pagecount, FREEPAGE);
 
   coalesce(p);
 }
@@ -423,8 +421,8 @@ void free_single_page(region r, struct page *p)
 {
 #ifndef NMEMDEBUG
   ASSERT_INUSE(p, r);
-  set_page_region(PAGENB(p), FREEPAGE);
 #endif
+  set_page_region(PAGENB(p), FREEPAGE);
 
   /* Once free list is big enough just coalesce the pages.
      The actual threshold to use might merit further study (something

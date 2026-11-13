@@ -222,7 +222,7 @@ void flowrow_register_edge(const bounds b, stamp st) {
 
   /* The current rollback info already has an edge list associated
    * with this bounds */
-  if (hash_table_lookup(flowrow_current_rollback_info->added_edges, (hash_key)bounds_stamp(b),
+  if (hash_table_lookup(flowrow_current_rollback_info->added_edges, (hash_key)(intptr_t)bounds_stamp(b),
                         (hash_data *)&info)) {
     assert(info);
     stamp_list_cons(st, info->sl);
@@ -232,7 +232,7 @@ void flowrow_register_edge(const bounds b, stamp st) {
     info = ralloc(added_edge_info_region, struct added_edge_info_);
     info->b = b;
     info->sl = sl;
-    hash_table_insert(flowrow_current_rollback_info->added_edges, (hash_key)bounds_stamp(b),
+    hash_table_insert(flowrow_current_rollback_info->added_edges, (hash_key)(intptr_t)bounds_stamp(b),
                       (hash_data)info);
   }
 #endif /* BANSHEE_ROLLBACK */
@@ -363,11 +363,9 @@ static contour make_contour(fresh_fn_ptr fresh, get_stamp_fn_ptr get_stamp, gen_
     result->get_stamp = get_stamp;
     result->instantiate = contour_instantiate;
 
-    hash_table_lookup(fn_ptr_table, (hash_key)result->fresh, (hash_data *)&result->fresh_fn_id);
-    hash_table_lookup(fn_ptr_table, (hash_key)result->get_stamp,
-                      (hash_data *)&result->get_stamp_id);
-    hash_table_lookup(fn_ptr_table, (hash_key)result->instantiate,
-                      (hash_data *)&result->contour_inst_id);
+    hash_table_lookup_int(fn_ptr_table, (hash_key)result->fresh, &result->fresh_fn_id);
+    hash_table_lookup_int(fn_ptr_table, (hash_key)result->get_stamp, &result->get_stamp_id);
+    hash_table_lookup_int(fn_ptr_table, (hash_key)result->instantiate, &result->contour_inst_id);
 
     return result;
   } else {
@@ -1090,16 +1088,16 @@ void flowrow_rollback(banshee_rollback_info info) {
   hash_table_scanner hash_scan;
   stamp_list_scanner stamp_scan;
   added_edge_info next_info;
-  stamp next_stamp, st;
+  stamp next_stamp;
   flow_var_list_scanner alias_scan;
   flow_var next_aliased;
 
   flowrow_rollback_info rinfo = (flowrow_rollback_info)info;
 
-  assert((rinfo->kind = flowrow_sort));
+  assert(rinfo->kind == flowrow_sort);
 
   hash_table_scan(rinfo->added_edges, &hash_scan);
-  while (hash_table_next(&hash_scan, (hash_key *)&st, (hash_data *)&next_info)) {
+  while (hash_table_next(&hash_scan, NULL, (hash_data *)&next_info)) {
     stamp_list_scan(next_info->sl, &stamp_scan);
     while (stamp_list_next(&stamp_scan, &next_stamp)) {
       bounds_remove(next_info->b, next_stamp);
@@ -1383,9 +1381,9 @@ int update_contour(translation t, void *m) {
   c->get_stamp = update_funptr_data(c->get_stamp_id);
   c->instantiate = update_funptr_data(c->contour_inst_id);
 
-  hash_table_lookup(fn_ptr_table, (hash_key)c->fresh, (hash_data *)&c->fresh_fn_id);
-  hash_table_lookup(fn_ptr_table, (hash_key)c->get_stamp, (hash_data *)&c->get_stamp_id);
-  hash_table_lookup(fn_ptr_table, (hash_key)c->instantiate, (hash_data *)&c->contour_inst_id);
+  hash_table_lookup_int(fn_ptr_table, (hash_key)c->fresh, &c->fresh_fn_id);
+  hash_table_lookup_int(fn_ptr_table, (hash_key)c->get_stamp, &c->get_stamp_id);
+  hash_table_lookup_int(fn_ptr_table, (hash_key)c->instantiate, &c->contour_inst_id);
 
   return sizeof(struct contour);
 }

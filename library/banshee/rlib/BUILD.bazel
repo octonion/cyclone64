@@ -6,6 +6,7 @@ cc_library(
     srcs = [
         "alloc.inc",
         "pages.inc",
+        "pagemap.h",
         "regions.c",
         "serialize.inc",
     ],

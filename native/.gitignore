@@ -1,0 +1,11 @@
+/build*/
+/asan*/
+/clang*/
+/gcc14*/
+/release*/
+/generated/
+/include/
+/bootstrap/
+/compiler-tests/
+/logs/
+/__pycache__/

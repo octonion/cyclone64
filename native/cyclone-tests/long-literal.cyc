@@ -1,0 +1,16 @@
+#include "cyclone/library/std/core.h"
+using Core;
+extern "C" unsigned long abi_echo(unsigned long);
+int main(int argc, string_t ?argv) {
+  if (argc < 1 || argv[0][0] == 0) return 1;
+  if (sizeof(int) != 4 || sizeof(long) != 8 || sizeof(void *) != 8) return 2;
+  unsigned long high = 0x123456789abcdef0UL;
+  if (abi_echo(high) != high) return 3;
+  region r;
+  int @ p = rnew(r) 123;
+  unsigned long address = (unsigned long)p;
+  if (address <= 0xffffffffUL || *(int *)address != 123) return 4;
+  int ? a = rnew(r) {10, 20, 30};
+  if (a[2] != 30 || numelts(a) != 3) return 5;
+  return 0;
+}

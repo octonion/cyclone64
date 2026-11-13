@@ -333,7 +333,7 @@ void setif_register_edge(const bounds b, stamp st) {
 
   /* The current rollback info already has an edge list associated
    * with this bounds */
-  if (hash_table_lookup(setif_current_rollback_info->added_edges, (hash_key)bounds_stamp(b),
+  if (hash_table_lookup(setif_current_rollback_info->added_edges, (hash_key)(intptr_t)bounds_stamp(b),
                         (hash_data *)&info)) {
     assert(info);
     stamp_list_cons(st, info->sl);
@@ -343,7 +343,7 @@ void setif_register_edge(const bounds b, stamp st) {
     info = ralloc(added_edge_info_region, struct added_edge_info_);
     info->b = b;
     info->sl = sl;
-    hash_table_insert(setif_current_rollback_info->added_edges, (hash_key)bounds_stamp(b),
+    hash_table_insert(setif_current_rollback_info->added_edges, (hash_key)(intptr_t)bounds_stamp(b),
                       (hash_data)info);
   }
 #endif /* BANSHEE_ROLLBACK */
@@ -355,7 +355,7 @@ void setif_register_ub_proj(gen_e_list ub_projs, gen_e e) {
   assert(setif_current_rollback_info);
 
   if (hash_table_lookup(setif_current_rollback_info->added_ub_projs,
-                        (hash_key)gen_e_list_stamp(ub_projs), (hash_data *)&info)) {
+                        (hash_key)(intptr_t)gen_e_list_stamp(ub_projs), (hash_data *)&info)) {
     assert(info);
     gen_e_list_cons(e, info->el);
   } else {
@@ -365,7 +365,7 @@ void setif_register_ub_proj(gen_e_list ub_projs, gen_e e) {
     info->ub_projs = ub_projs;
     info->el = el;
     hash_table_insert(setif_current_rollback_info->added_ub_projs,
-                      (hash_key)gen_e_list_stamp(ub_projs), (hash_data)info);
+                      (hash_key)(intptr_t)gen_e_list_stamp(ub_projs), (hash_data)info);
   }
 #endif /* BANSHEE_ROLLBACK */
 }
@@ -1213,20 +1213,20 @@ void setif_rollback(banshee_rollback_info info) {
   stamp_list_scanner stamp_scan;
   added_edge_info next_info;
   added_ub_proj_info next_ubproj_info;
-  stamp next_stamp, st;
+  stamp next_stamp;
   gen_e_list_scanner expr_scan;
   gen_e next_expr;
 
   setif_rollback_info tinfo = (setif_rollback_info)info;
 
-  assert((tinfo->kind = setif_sort));
+  assert(tinfo->kind == setif_sort);
 
   lazy_invalidate_tlb_cache();
   term_hash_delete(setif_hash);
   setif_hash = make_term_hash(NULL);
 
   hash_table_scan(tinfo->added_edges, &hash_scan);
-  while (hash_table_next(&hash_scan, (hash_key *)&st, (hash_data *)&next_info)) {
+  while (hash_table_next(&hash_scan, NULL, (hash_data *)&next_info)) {
     stamp_list_scan(next_info->sl, &stamp_scan);
     while (stamp_list_next(&stamp_scan, &next_stamp)) {
       bool present = bounds_remove(next_info->b, next_stamp);
@@ -1236,7 +1236,7 @@ void setif_rollback(banshee_rollback_info info) {
   }
 
   hash_table_scan(tinfo->added_ub_projs, &hash_scan);
-  while (hash_table_next(&hash_scan, (hash_key *)&st, (hash_data *)&next_ubproj_info)) {
+  while (hash_table_next(&hash_scan, NULL, (hash_data *)&next_ubproj_info)) {
     gen_e_list_scan(next_ubproj_info->el, &expr_scan);
     while (gen_e_list_next(&expr_scan, &next_expr)) {
       current_expr = next_expr;

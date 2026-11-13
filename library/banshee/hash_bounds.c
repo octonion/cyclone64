@@ -77,14 +77,14 @@ bool bounds_next(bounds_scanner *scan, gen_e *e) {
 }
 
 bool bounds_add(bounds b, gen_e e, stamp st) {
-  return !hash_table_insert(b->table, (hash_key)st, (hash_data)e);
+  return !hash_table_insert(b->table, (hash_key)(intptr_t)st, (hash_data)e);
 }
 
 /* Returns TRUE if e was in the bounds */
-bool bounds_remove(bounds b, stamp st) { return hash_table_remove(b->table, (hash_key)st); }
+bool bounds_remove(bounds b, stamp st) { return hash_table_remove(b->table, (hash_key)(intptr_t)st); }
 
 bool bounds_query(bounds b, stamp st) {
-  bool result = hash_table_lookup(b->table, (hash_key)st, NULL);
+  bool result = hash_table_lookup(b->table, (hash_key)(intptr_t)st, NULL);
   return result;
 }
 

@@ -243,12 +243,12 @@ int list_stamp(struct list *a);
   name new_##name(region r) { return (name)new_list(r, 0); }                                      \
   name new_persistent_##name() { return (name)new_list(NULL, 0); }                                \
   int name##_length(name a) { return list_length((struct list *)a); }                             \
-  name name##_cons(type data, name a) { return (name)list_cons((void *)data, (struct list *)a); } \
+  name name##_cons(type data, name a) { return (name)list_cons((void *)(intptr_t)data, (struct list *)a); }\
   name name##_append(name a, name b) {                                                            \
     return (name)list_append((struct list *)a, (struct list *)b);                                 \
   }                                                                                               \
   name name##_append_tail(type data, name a) {                                                    \
-    return (name)list_append_tail((void *)data, (struct list *)a);                                \
+    return (name)list_append_tail((void *)(intptr_t)data, (struct list *)a);                              \
   }                                                                                               \
   name name##_app(name a, name##_app_fn app) {                                                    \
     return (name)list_app((struct list *)a, (app_fn)app);                                         \
@@ -283,18 +283,26 @@ int list_stamp(struct list *a);
     list_scan((struct list *)a, (struct list_scanner *)scan);                                     \
   }                                                                                               \
   bool name##_next(name##_scanner *scan, type *data) {                                            \
-    return list_next((struct list_scanner *)scan, (void **)data);                                 \
+    void *value;                                                                                          \
+    bool found = list_next((struct list_scanner *)scan, &value);                                          \
+    if (found) *data = (type)(intptr_t)value;                                                             \
+    return found;                                                                                         \
   }                                                                                               \
   bool name##_empty(name a) { return list_empty((struct list *)a); }                              \
   void name##_clear(name a) { list_clear((struct list *)a); }                                     \
-  bool name##_member(name a, type data) { return list_member((struct list *)a, (void *)data); }   \
+  bool name##_member(name a, type data) { return list_member((struct list *)a, (void *)(intptr_t)data); } \
   name name##_reverse(name a) { return (name)list_reverse((struct list *)a); }                    \
   name name##_from_array(region r, type data[], int length) {                                     \
-    return (name)list_from_array(r, (void **)data, length);                                       \
+    name result = new_##name(r);                                                                          \
+    for (int i = 0; i < length; ++i) name##_append_tail(data[i], result);                                 \
+    return result;                                                                                        \
   }                                                                                               \
   int name##_stamp(name a) { return list_stamp((struct list *)a); }                               \
   type *name##_array_from_list(region r, name a) {                                                \
-    return (type *)array_from_list(r, (struct list *)a);                                          \
+    type *result = rarrayalloc(r, name##_length(a), type);                                                \
+    name##_scanner scan; int i = 0; name##_scan(a, &scan);                                                \
+    while (name##_next(&scan, &result[i])) ++i;                                                           \
+    return result;                                                                                        \
   }
 
 void list_init();

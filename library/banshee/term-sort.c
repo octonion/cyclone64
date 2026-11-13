@@ -201,7 +201,7 @@ static void term_register_edge(const bounds b, stamp st) {
 
   /* The current rollback info already has an edge list associated
    * with this bounds */
-  if (hash_table_lookup(term_current_rollback_info->added_edges, (hash_key)bounds_stamp(b),
+  if (hash_table_lookup(term_current_rollback_info->added_edges, (hash_key)(intptr_t)bounds_stamp(b),
                         (hash_data *)&info)) {
     assert(info);
     stamp_list_cons(st, info->sl);
@@ -211,7 +211,7 @@ static void term_register_edge(const bounds b, stamp st) {
     info = ralloc(added_edge_info_region, struct added_edge_info_);
     info->b = b;
     info->sl = sl;
-    hash_table_insert(term_current_rollback_info->added_edges, (hash_key)bounds_stamp(b),
+    hash_table_insert(term_current_rollback_info->added_edges, (hash_key)(intptr_t)bounds_stamp(b),
                       (hash_data)info);
   }
 #endif /* BANSHEE_ROLLBACK */
@@ -359,14 +359,14 @@ void term_rollback(banshee_rollback_info info) {
   hash_table_scanner hash_scan;
   stamp_list_scanner stamp_scan;
   added_edge_info next_info;
-  stamp next_stamp, st;
+  stamp next_stamp;
 
   term_rollback_info tinfo = (term_rollback_info)info;
 
-  assert((tinfo->kind = term_sort));
+  assert(tinfo->kind == term_sort);
 
   hash_table_scan(tinfo->added_edges, &hash_scan);
-  while (hash_table_next(&hash_scan, (hash_key *)&st, (hash_data *)&next_info)) {
+  while (hash_table_next(&hash_scan, NULL, (hash_data *)&next_info)) {
     stamp_list_scan(next_info->sl, &stamp_scan);
     while (stamp_list_next(&stamp_scan, &next_stamp)) {
       bounds_remove(next_info->b, next_stamp);

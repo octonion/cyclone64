@@ -84,16 +84,10 @@ extern struct region zeroregion;
 #endif
 #endif
 
-#if defined(__GNUC__) && defined(sparc)
-extern regionid __rcregionmaparray[];
-register regionid *__rcregionmap asm("%g6");
-#else
-extern regionid __rcregionmap[];
-#endif
-
 #include <stdlib.h>
+#include <stdint.h>
 
-typedef unsigned long __rcintptr;
+typedef uintptr_t __rcintptr;
 
 struct ablock {
   char *base, *allocfrom;
@@ -171,7 +165,7 @@ region regionof(void *ptr);
 typedef void (*nomem_handler)(void);
 nomem_handler set_nomem_handler(nomem_handler newhandler);
 
-#define regionidof(ptr) (__rcregionmap[(unsigned long)(ptr) >> RPAGELOG])
+regionid regionidof(const void *ptr);
 
 #ifdef SAFE_ADJUSTFN
 #define RC_ADJUST_PREAMBLE regionid baseregion = regionof(p)
@@ -236,7 +230,7 @@ void check_child(region r, region of);
 
 struct translation {
   region reg;
-  void **map;
+  struct page_map *map;
 };
 
 /*
@@ -250,9 +244,8 @@ extern translation deserialize(char *, char *, Updater *, region);
 extern void update_pointer(translation, void **);
 extern void *translate_pointer(translation, void *);
 
-#define TRANSLATEPOINTER(m, a) \
-  ((*(m->map + (((unsigned int)a) >> SHIFT))) + (((unsigned int)a) & 0x00001FFF))
-#define UPDATEPOINTER(map, loc) *(loc) = TRANSLATEPOINTER(map, loc)
+#define TRANSLATEPOINTER(m, a) translate_pointer((m), (void *)(a))
+#define UPDATEPOINTER(map, loc) update_pointer((map), (void **)(loc))
 
 EXTERN_C_END
 #endif

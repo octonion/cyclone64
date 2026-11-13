@@ -112,8 +112,8 @@ static hash_table make_hash_table_int(region r, unsigned long size, hash_fn hash
   result->log2size = 0;
 
   if (fn_ptr_table) {
-    hash_table_lookup(fn_ptr_table, (hash_key)hash, (hash_data *)&result->hash_fn_id);
-    hash_table_lookup(fn_ptr_table, (hash_key)cmp, (hash_data *)&result->keyeq_fn_id);
+    hash_table_lookup_int(fn_ptr_table, (hash_key)hash, &result->hash_fn_id);
+    hash_table_lookup_int(fn_ptr_table, (hash_key)cmp, &result->keyeq_fn_id);
   }
 
   result->key_persist_kind = key_persist_kind;
@@ -173,7 +173,8 @@ static inline bucket *find_bucket(hash_table ht, hash_key k) {
 
   hash = ht->hash(k);
   hash = hash * LLMAGIC;
-  hash = hash >> (8 * sizeof(unsigned long) - ht->log2size);
+  if (ht->size != 1)
+    hash = hash >> (8 * sizeof(unsigned long) - ht->log2size);
   if (ht->size == 1)
     hash = 0;
   /* hash = hash % ht->size; */
@@ -202,6 +203,13 @@ bool hash_table_hash_search(hash_table ht, keyeq_fn cmp, hash_key k, hash_data *
    result is TRUE if the k was in ht, false otherwise. */
 bool hash_table_lookup(hash_table ht, hash_key k, hash_data *d) {
   return hash_table_hash_search(ht, ht->cmp, k, d);
+}
+
+bool hash_table_lookup_int(hash_table ht, hash_key k, int *out) {
+  hash_data data;
+  if (!hash_table_lookup(ht, k, &data)) return FALSE;
+  *out = (int)(intptr_t)data;
+  return TRUE;
 }
 
 /* Add k:d to ht.  If k was already in ht, replace old entry by k:d.
@@ -513,12 +521,12 @@ int update_hash_table(translation t, void *m) {
 
   if (tab->hash_fn_id < num_fn_ptrs) {
     tab->hash = update_funptr_data(tab->hash_fn_id);
-    hash_table_lookup(fn_ptr_table, (hash_key)tab->hash, (hash_data *)&tab->hash_fn_id);
+    hash_table_lookup_int(fn_ptr_table, (hash_key)tab->hash, &tab->hash_fn_id);
   }
 
   if (tab->keyeq_fn_id < num_fn_ptrs) {
     tab->cmp = update_funptr_data(tab->keyeq_fn_id);
-    hash_table_lookup(fn_ptr_table, (hash_key)tab->cmp, (hash_data *)&tab->keyeq_fn_id);
+    hash_table_lookup_int(fn_ptr_table, (hash_key)tab->cmp, &tab->keyeq_fn_id);
   }
 
   update_pointer(t, (void **)&tab->table);

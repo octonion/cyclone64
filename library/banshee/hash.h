@@ -89,6 +89,8 @@ bool hash_table_hash_search(hash_table ht, keyeq_fn cmp, hash_key k, hash_data *
 /* Lookup k in ht.  If d is not NULL, returns corresponding data in *d.
    Function result is TRUE if the k was in ht, false otherwise. */
 bool hash_table_lookup(hash_table ht, hash_key k, hash_data *d);
+/* Decode an integer payload without writing a pointer into an int object. */
+bool hash_table_lookup_int(hash_table ht, hash_key k, int *out);
 
 /* Add k:d to ht.  If k was already in ht, replace old entry by k:d.
    Rehash if necessary.  Returns TRUE if k was not already in ht. */

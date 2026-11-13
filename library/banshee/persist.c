@@ -250,7 +250,7 @@ bool funptr_data_serialize(FILE *f, void *obj) {
   assert(f);
   assert(obj);
 
-  success = hash_table_lookup(fn_ptr_table, (hash_key)obj, (hash_data *)&id);
+  success = hash_table_lookup_int(fn_ptr_table, (hash_key)obj, &id);
 
   success &= fwrite((void *)&id, sizeof(int), 1, f);
 
@@ -275,7 +275,7 @@ void *update_funptr_data(int id) { return fn_ptr_array[id]; }
 bool funptr_data_set_fields(void *obj) { return TRUE; }
 
 bool string_data_serialize(FILE *f, void *obj) {
-  int length = strlen((char *)obj);
+  long length = strlen((char *)obj);
   /* write the string length */
   fwrite_s((void *)&length, sizeof(long), 1, f);
   fwrite_s((void *)obj, sizeof(char), strlen((char *)obj), f);
@@ -288,7 +288,7 @@ void *string_data_deserialize(FILE *f) {
   char buf[512];
 
   fread_s((void *)&length, sizeof(long), 1, f);
-  assert(length < 512);
+  assert(length >= 0 && length < 512);
   fread_s((void *)buf, sizeof(char), length, f);
   buf[length] = '\0';
 

@@ -88,7 +88,7 @@ void write_extra_info(const char *filename, unsigned long num_regions) {
   assert(fn_ptr_table);
   while (hash_table_next(&scan, (const hash_key *)&next_region, (hash_data *)&next_updater)) {
     int id = 0;
-    bool success = hash_table_lookup(fn_ptr_table, (hash_key)next_updater, (hash_data *)&id);
+    bool success = hash_table_lookup_int(fn_ptr_table, (hash_key)next_updater, &id);
     if (!success) {
       if (next_updater == extra_update_fn)
         fwrite_s((void *)&unknown_id, sizeof(int), 1, f);

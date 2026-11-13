@@ -139,7 +139,7 @@ bool regexp_complete_inclusion(regexp r1, regexp r2, unsigned char pos1, unsigne
 
   /* check if this state has been visited. if so, return true. If not,
      insert */
-  if (!hash_table_insert(visited, (hash_key)state, 0)) {
+  if (!hash_table_insert(visited, (hash_key)(intptr_t)state, 0)) {
     return TRUE;
   }
 

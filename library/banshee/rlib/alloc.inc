@@ -40,8 +40,8 @@ static void mark_page_end(struct ablock *page, size_t blksize) {
     *(void **)nexthdr = NULL;
 }
 
-void alloc_block(region r, struct allocator *a, struct ablock *blk, void **p1, int s1, int a1,
-                 void **p2, int s2, int a2, size_t blksize, int needsclear) {
+void alloc_block(region r, struct allocator *a, struct ablock *blk, void **p1, size_t s1, size_t a1,
+                 void **p2, size_t s2, size_t a2, size_t blksize, int needsclear) {
   struct page *newp;
   char *mem1, *mem2;
 
@@ -85,12 +85,18 @@ void alloc_block(region r, struct allocator *a, struct ablock *blk, void **p1, i
   *p2 = mem2;
 }
 
-void qalloc(region r, struct allocator *a, void **p1, int s1, int a1, void **p2, int s2, int a2,
+void qalloc(region r, struct allocator *a, void **p1, size_t s1, size_t a1, void **p2, size_t s2, size_t a2,
             int needsclear) {
   struct page *p;
   char *mem;
   int npages;
-  int n = ALIGN(s1, a2) + s2; /* Yes, this is correct (see alloc_block) */
+  /* Page counts and the native snapshot format still use int sizes. Reject
+   * oversized requests before narrowing or adding; never silently truncate. */
+  if (s1 > INT_MAX - 2 * RPAGESIZE || s2 > INT_MAX - 2 * RPAGESIZE - s1) {
+    if (nomem_h) nomem_h();
+    abort();
+  }
+  size_t n = ALIGN(s1, a2) + s2; /* Yes, this is correct (see alloc_block) */
 
   if (n <= RPAGESIZE / K)
     return alloc_block(r, a, &a->page, p1, s1, a1, p2, s2, a2, RPAGESIZE, needsclear);
@@ -101,7 +107,7 @@ void qalloc(region r, struct allocator *a, void **p1, int s1, int a1, void **p2,
   /*     return alloc_block(r, a, &a->hyperpage, p1, s1, a1, p2, s2, a2, */
   /* 		       K * K * RPAGESIZE, needsclear); */
 
-  npages = (n + ALIGN(offsetof(struct page, previous), a1) + RPAGESIZE - 1) >> RPAGELOG;
+  npages = (n + ALIGN(offsetof(struct page, previous), a2) + RPAGESIZE) >> RPAGELOG;
   p = alloc_pages(npages, a->bigpages);
   a->bigpages = p;
   set_region(p, npages, r);

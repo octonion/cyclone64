@@ -36,6 +36,8 @@
 #include "regions.h"
 
 #include <assert.h>
+#include <stddef.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -44,7 +46,6 @@ region permanent = NULL;
 #define RPAGESIZE (1u << RPAGELOG)
 #define PAGE_GROUP_SIZE 32
 #define K 4
-#define MAXPAGE (1u << (32 - RPAGELOG))
 
 #define PAGENB(x) ((__rcintptr)(x) >> RPAGELOG)
 
@@ -76,10 +77,10 @@ struct array_hdr {
   size_t n;
 };
 
-#define ALIGN(x, n) (((x) + ((n) - 1)) & ~((n) - 1))
+#define ALIGN(x, n) (((x) + ((__rcintptr)(n) - 1)) & ~((__rcintptr)(n) - 1))
 #define PALIGN(x, n) ((void *)ALIGN((__rcintptr)(x), n))
 #ifdef __GNUC__
-#define RALIGNMENT __alignof(unsigned long) /* double would be safer */
+#define RALIGNMENT __alignof(uintptr_t) /* snapshot updaters scan word-aligned objects */
 #define ALIGNMENT_HDR __alignof(adjust_fn *)
 #define PTRALIGNMENT __alignof(void *)
 #define ALIGNMENT_LONG __alignof(unsigned long)
@@ -250,6 +251,7 @@ static size_t cleanup_array(void *x, int by) {
 }
 
 void *typed_rarrayextend(region r, void *old, size_t n, size_t size, adjust_fn *cleanup) {
+  if (size && n > SIZE_MAX / size) abort();
   /* For now we don't attempt to extend the old storage area */
   void *mem, *hdr;
   struct array_hdr *ahdr;
@@ -286,6 +288,7 @@ void *typed_rarrayextend(region r, void *old, size_t n, size_t size, adjust_fn *
 }
 
 void *typed_rarrayalloc(region r, size_t n, size_t size, adjust_fn *cleanup) {
+  if (size && n > SIZE_MAX / size) abort();
   /* return typed_rarrayextend(r, NULL, n, size, cleanup); */
   /* replace fancy array allocation by simple allocation of a C-style array */
   char *mem = rstralloc(r, n * size);
@@ -365,6 +368,7 @@ char *rstrextend0(region r, const char *old, size_t newsize) {
 }
 
 void typed_rarraycopy(void *to, void *from, size_t n, size_t size, type_t type) {
+  if (size && n > SIZE_MAX / size) abort();
   /*
   char *cto;
   int i;
@@ -1042,14 +1046,9 @@ static void benchmark_init(void) { fputs("heap: " HEAPNAME "\n", stderr); }
 
 void region_init(void) {
   static int initialized = 0;
-  int i;
 
   if (initialized)
     return;
-
-#if defined(__GNUC__) && defined(sparc)
-  __rcregionmap = __rcregionmaparray;
-#endif
 
 #if 0
   int dummy_local;
@@ -1073,10 +1072,6 @@ void region_init(void) {
   set_region_range(0, (void *)1, &zeroregion);
 #endif
 
-#ifndef RCPAIRS_ARRAY
-  for (i = 0; i < MAXPAGE; i++)
-    __rcregionmap[i] = &zeroregion;
-#endif
 
   rstart = 0; /* changed to 0 from -64 */
 
@@ -1118,8 +1113,6 @@ int main(int argc, char **argv, char **envp) {
 static FILE *out;
 
 static void printref(void *x) {
-  if (x >= (void *)__rcregionmap && x < (void *)&__rcregionmap[MAXPAGE])
-    return;
 
 #ifdef RCPAIRS
   if (x >= (void *)__rcregions && x < (void *)&__rcregions[MAXREGIONS])

@@ -68,13 +68,6 @@ static struct _fat_ptr Cstring_to_string(char *s) {
 
 #endif
 
-// argc is redundant
-struct _fat_argv {
-  struct _fat_ptr *base;
-  struct _fat_ptr *curr;
-  struct _fat_ptr *last_plus_one;
-};
-
 // Define struct __cycFILE, and initialize stdin, stdout, stderr
 struct Cyc___cycFILE {
   // must match defn in boot_cstubs.c and boot_cycstubs.cyc
@@ -85,8 +78,10 @@ static struct Cyc___cycFILE Cyc_stdin_v, Cyc_stdout_v, Cyc_stderr_v;
 struct Cyc___cycFILE *Cyc_stdin = &Cyc_stdin_v, *Cyc_stdout = &Cyc_stdout_v,
                      *Cyc_stderr = &Cyc_stderr_v;
 
+extern int Cyc_main(int argc, struct _fat_ptr argv);
+
 #ifndef CYC_STATIC_MAIN
-int __attribute__((weak)) Cyc_main(int argc, struct _fat_argv argv) {
+int __attribute__((weak)) Cyc_main(int argc, struct _fat_ptr argv) {
   fputs("no main function\n", stderr);
   abort();
 }
@@ -128,13 +123,15 @@ int main(int argc, char **argv) {
   // NULL to the end of the argv so that people can step through argv
   // until they hit NULL. (Calling calloc with argc+1 takes care of this.)
   {
-    struct _fat_argv args;
+    struct _fat_ptr args;
+    struct _fat_ptr *entries;
     int i, result;
-    args.curr = GC_calloc(argc + 1, sizeof(struct _fat_ptr));
+    entries = GC_calloc(argc + 1, sizeof(struct _fat_ptr));
+    args.curr = (unsigned char *)entries;
     args.base = args.curr;
-    args.last_plus_one = args.curr + argc + 1;
+    args.last_plus_one = (unsigned char *)(entries + argc + 1);
     for (i = 0; i < argc; ++i)
-      args.curr[i] = Cstring_to_string(argv[i]);
+      entries[i] = Cstring_to_string(argv[i]);
     result = Cyc_main(argc, args);
     GC_free(args.curr);
     _fini_regions();

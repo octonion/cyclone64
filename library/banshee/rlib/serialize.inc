@@ -176,8 +176,11 @@ int serialize_region(region r, int data, int state) {
 int serialize(region *r, char *datafile, char *statefile) {
   int data = open(datafile, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
   int state = open(statefile, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-  if ((data == -1) || (state == -1))
+  if ((data == -1) || (state == -1)) {
+    if (data != -1) close(data);
+    if (state != -1) close(state);
     return -1;
+  }
 
   for (; *r != NULL; r++)
     serialize_region(*r, data, state);
@@ -193,14 +196,12 @@ deserialization consists of an array lookup using the high order bits
 of the old address as the index.  Note that this implementation
 requires that pages be aligned at addresses where the last RPAGELOG bits are 0's.
 */
-inline void *translate_pointer(translation map, void *old_address) {
-#ifndef NMEMDEBUG
-  if (old_address && (*(map->map + (((uintptr_t)old_address) >> RPAGELOG)) == 0))
-    fprintf(stderr, "Warning: The pointer %lx has no translation.\n",
-            (unsigned long)(uintptr_t)old_address);
-#endif
-  return (*(map->map + (((uintptr_t)old_address) >> RPAGELOG))) +
-         (((uintptr_t)old_address) & (((uintptr_t)0xFFFFFFFF) >> (32 - RPAGELOG)));
+void *translate_pointer(translation map, void *old_address) {
+  if (!old_address) return NULL;
+  uintptr_t address = (uintptr_t)old_address;
+  char *base = page_map_get(map->map, address >> RPAGELOG);
+  if (!base) return NULL;
+  return base + (address & (RPAGESIZE - 1));
 }
 
 void update_pointer(translation map, void **location) {
@@ -279,8 +280,9 @@ void allocate_regions(int state, translation map) {
     */
     for (; num_pages > 0;) {
       num_pages--;
-      *(map->map + ((((uintptr_t)ps.old_address) + (num_pages * RPAGESIZE)) >> RPAGELOG)) =
-          (void *)(((char *)newpage) + (num_pages * RPAGESIZE));
+      page_map_set(map->map,
+                   ((uintptr_t)ps.old_address >> RPAGELOG) + num_pages,
+                   (char *)newpage + (size_t)num_pages * RPAGESIZE);
     }
   }
 }
@@ -292,7 +294,8 @@ void allocate_regions(int state, translation map) {
   be update in the region objects.
 */
 void update_ablock(translation map, struct ablock *a, struct ablock *old) {
-  a->allocfrom = translate_pointer(map, (void *)old->allocfrom);
+  a->base = translate_pointer(map, old->base);
+  a->allocfrom = translate_pointer(map, old->allocfrom);
 }
 
 void update_allocator(translation map, struct allocator *a, struct allocator *b) {
@@ -430,11 +433,14 @@ translation new_translation(region r) {
   struct translation *t = (struct translation *)rstralloc(r, sizeof(struct translation));
   t->reg = newregion();
   /* We rely on this map be zeroed out by the memory allocator. */
-  t->map = (void **)rstralloc(t->reg, sizeof(void *) * (1u << (32 - RPAGELOG)));
+  t->map = ralloc(t->reg, struct page_map);
   return t;
 }
 
-void delete_translation(translation t) { deleteregion(t->reg); }
+void delete_translation(translation t) {
+  page_map_destroy(t->map);
+  deleteregion(t->reg);
+}
 
 /*
   Deserialize a set of regions.  "update" must be an array of update functions, one for
@@ -447,8 +453,12 @@ translation deserialize(char *datafile, char *statefile, Updater *update, region
   struct translation *t = new_translation(r);
   int data = open(datafile, O_RDONLY);
   int state = open(statefile, O_RDONLY);
-  if ((data == -1) || (state == -1))
+  if ((data == -1) || (state == -1)) {
+    if (data != -1) close(data);
+    if (state != -1) close(state);
+    delete_translation(t);
     return NULL;
+  }
 
   if (RPAGESIZE != (1u << RPAGELOG)) {
     fprintf(stderr, "Error: Unexpected page size in deserialization\n");

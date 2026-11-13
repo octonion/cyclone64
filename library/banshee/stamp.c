@@ -81,9 +81,9 @@ stamp stamp_string(const char *str) deletes {
   int st;
   assert(str_hash != NULL);
 
-  if (!hash_table_lookup(str_hash, (hash_key)str, (hash_data *)&st)) {
+  if (!hash_table_lookup_int(str_hash, (hash_key)str, &st)) {
     st = stamp_fresh();
-    (void)hash_table_insert(str_hash, (hash_key)str, (hash_data)st);
+    (void)hash_table_insert(str_hash, (hash_key)str, (hash_data)(intptr_t)st);
   }
   return st;
 }

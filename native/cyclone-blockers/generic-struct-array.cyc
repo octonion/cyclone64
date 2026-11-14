@@ -1,0 +1,31 @@
+#include "cyclone/library/std/core.h"
+using Core;
+struct Elements<`a> { `a data[2]; int marker; };
+struct Outer<`a> { struct Elements<`a> inner; };
+static int check(`a::B x,`a y) {
+  struct Elements<`a> a={.data={x,y},.marker=123};
+  if(a.data[0]!=x || a.data[1]!=y || a.marker!=123) return 1;
+  `a ?p=a.data;
+  if(p[1]!=y || sizeof(a.data)!=2*sizeof(`a)) return 2;
+  p[0]=y;
+  if(a.data[0]!=y || a.marker!=123 || p!=a.data) return 3;
+  struct Outer<`a> outer={.inner=a};
+  `a ?nested=outer.inner.data;
+  nested[0]=x;
+  if(outer.inner.data[0]!=x || outer.inner.marker!=123) return 4;
+  struct Elements<`a> copies[2]={a,a};
+  unsigned i=0;
+  `a ?selected=copies[i++].data;
+  selected[1]=x;
+  return i==1 && copies[0].data[1]==x && copies[1].data[1]==y ? 0 : 5;
+}
+int main(int argc,string_t ?argv) {
+  struct Elements<int> a={.data={11,-29},.marker=77};
+  if(a.data[0]!=11 || a.data[1]!=-29 || a.marker!=77) return 1;
+  int ?p=a.data;
+  p[1]=37;
+  if(a.data[1]!=37 || p!=a.data) return 2;
+  let checked=check(11,-29);
+  if(checked) return 10+checked;
+  return check(0x1234567800000011L,0x4321876500000029L) ? 3 : 0;
+}

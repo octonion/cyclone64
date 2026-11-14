@@ -640,9 +640,11 @@ static exp_t lower_rhs(Toc::toc_context_t ctxt, env_t env, bool effect_only, boo
       res = deref_exp(lower_rhs(ctxt, env, false, false, e1), e->loc);
       break;
     case &AggrMember_e(e1, f, it, ir):
-      // Hmmm.  It's not clear that we want to break apart
-      // e.f1.f2.f3...fn
-      res = aggrmember_exp(lower_rhs(ctxt, env, false, false, e1), f, e->loc);
+      // Preserve the storage of an lvalue aggregate. Copying it to a temp
+      // makes an array member decay to the copy, so writes miss the original.
+      let base = is_lvalue(e1) ? lower_lhs(ctxt, env, e1)
+                                      : lower_rhs(ctxt, env, false, false, e1);
+      res = aggrmember_exp(base, f, e->loc);
       break;
     case &AggrArrow_e(e1, f, it, ir):
       // Hmmm.  We might eliminate e.f in favor of *(e.f).

@@ -754,6 +754,9 @@ static bool native_layout_type(type_t t) {
 static var_t native_layout_name(int i) {
   return new (string_t) aprintf("_cyc_layout_%d", i);
 }
+static field_name_t native_exist_name(int i) {
+  return new (string_t) aprintf("_cyc_exist_layout_%d", i);
+}
 static list_t<$(var_opt_t, tqual_t, type_t) @> native_layout_args(list_t<tvar_t> tvs) {
   list_t<$(var_opt_t, tqual_t, type_t) @> args = NULL;
   if (!Flags::native_layouts) return args;
@@ -3200,6 +3203,16 @@ void exp_to_c(env_t nv, exp_t e) {
       // generate struct definitions and other nasty stuff
       if (sd == NULL || sd->impl == NULL)
         toc_impos("exp_to_c, Aggregate_e: missing aggrdecl pointer or fields");
+      list_t<$(list_t<designator_t>, exp_t) @> layout_initializers = NULL;
+      if (Flags::native_layouts) {
+        int i = 0;
+        let ts = exist_ts;
+        for (let tvs = sd->impl->exist_vars; tvs != NULL && ts != NULL; tvs = tvs->tl, ts = ts->tl)
+          if (Kinds::tvar_kind(tvs->hd, &Kinds::bk)->kind == BoxKind)
+            layout_initializers = new List(make_field(native_exist_name(i++),
+                              native_layout_size(nv->ctxt, ts->hd)), layout_initializers);
+        layout_initializers = imp_rev(layout_initializers);
+      }
       let new_typ = typ_to_c(nv->ctxt, old_typ);
       switch (compress(new_typ)) {  // typ_to_c may change the struct name!
         case &AppType(&AggrCon(info), _):
@@ -3214,8 +3227,13 @@ void exp_to_c(env_t nv, exp_t e) {
       // too, which suggests doing it after translating more things to
       // aggregates
       let typ_fields = sd->impl->fields;
-      if (typ_fields == NULL)
-        break;  // no fields (maybe possible)
+      if (typ_fields == NULL) {
+        if (layout_initializers != NULL) {
+          if (is_toplevel(nv)) e->r = unresolvedmem_exp_r(NULL, layout_initializers);
+          else e->r = new Aggregate_e(*tdn, NULL, layout_initializers, sd);
+        }
+        break;
+      }
       for (; typ_fields->tl != NULL; typ_fields = typ_fields->tl)
         ;
       let last_typ_field = typ_fields->hd;
@@ -3364,6 +3382,13 @@ void exp_to_c(env_t nv, exp_t e) {
             }
           e->r = unresolvedmem_exp_r(NULL, imp_rev(newdles));
         }
+      }
+      if (layout_initializers != NULL) switch (e->r) {
+        case &Aggregate_e(_, _, *fields, _):
+          *fields = append(layout_initializers, *fields); break;
+        case &UnresolvedMem_e(_, *fields):
+          *fields = append(layout_initializers, *fields); break;
+        default: toc_impos("existential initializer lost aggregate representation");
       }
       break;
 
@@ -3983,7 +4008,7 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
       }
       return s;
 
-    case &Aggr_p(topt, _, _, dlps, _):
+    case &Aggr_p(topt, _, exists, dlps, _):
       if (topt == NULL)
         toc_impos("unresolved aggregate pattern!");
       type_t atype = (type_t)topt;
@@ -4004,6 +4029,20 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
           toc_impos("bad type in aggr pattern");
       }
       stmt_opt_t s = NULL;
+      if (Flags::native_layouts) {
+        int i = 0;
+        for (let tvs = exists; tvs != NULL; tvs = tvs->tl)
+          if (Kinds::tvar_kind(tvs->hd, &Kinds::bk)->kind == BoxKind) {
+            let field = set_type(member_exp(deep_copy(rpath), native_exist_name(i++), DL), ulong_type);
+            let bound_vd = new_vardecl(DL, temp_var(ctxt), ulong_type, NULL, NULL);
+            let temp_vd = new_vardecl(DL, temp_var(ctxt), ulong_type, NULL, NULL);
+            let bound = set_type(varb_exp(new Local_b(bound_vd), DL), ulong_type);
+            let temporary = set_type(varb_exp(new Local_b(temp_vd), DL), ulong_type);
+            *newdecls = rnew(rgn) List{rnew(rgn) $(bound_vd, temp_vd, ulong_type, false), *newdecls};
+            ctxt->native_layout_params = new List(new $(tvs->hd->identity, bound), ctxt->native_layout_params);
+            s = seq_stmt_opt(s, assign_stmt(temporary, field, DL));
+          }
+      }
       for (; dlps != NULL; dlps = dlps->tl) {
         let tup = dlps->hd;
         let p2  = (*tup)[1];
@@ -4906,6 +4945,17 @@ static int aggrdecl_to_c_body<`d,`r>(region_t<`d> d,
       new_fields = new List(new_field, new_fields);
     }
     new_ad->impl->fields = List::imp_rev(new_fields);
+    if (Flags::native_layouts) {
+      list_t<aggrfield_t> layouts = NULL;
+      int i = 0;
+      for (let tvs = ad->impl->exist_vars; tvs != NULL; tvs = tvs->tl)
+        if (Kinds::tvar_kind(tvs->hd, &Kinds::bk)->kind == BoxKind) {
+          if (ad->kind != StructA) Warn::err2(DL, "native existential layouts require a struct");
+          layouts = new List(new Aggrfield(native_exist_name(i++), mt_tq,
+                                          ulong_type, NULL, NULL, NULL), layouts);
+        }
+      new_ad->impl->fields = append(imp_rev(layouts), new_ad->impl->fields);
+    }
   }
   // DJG: !seen_defn_before a hack because of TypedefType
   if (!seen_defn_before)

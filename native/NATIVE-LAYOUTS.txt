@@ -44,10 +44,11 @@ native/compiler-tests/<run>/commands.json. Relevant logs:
   native/logs/layout-callback-leak.log
 
 Not yet satisfactory:
-- generic-existential-reference.cyc fails: unpacking a hidden boxed type does
-  not restore its layout. Unknown layouts currently emit zero, which rejects
-  actual dereferences instead of guessing word width. Struct construction and
-  pattern unpacking must carry the metadata before this is enabled by default.
+- Existential struct layouts are now restored: constructors store metadata,
+  pattern unpacking captures it, and repacking/forwarding preserve it. The
+  expanded test covers 4/8-byte values, nested patterns, static construction,
+  generic factories and callbacks. layout-exist-full passes these and upstream
+  tests with ASan/UBSan/function. Existential unions remain unsupported.
 - layout-full3 vs layout-full4 agrees for 80/81 generated C files. printf.c
   differs in one bounds-check elimination decision and consequent temp names.
   Repeating printf translation with layout-full4 produces the other variant.
@@ -74,3 +75,7 @@ Logs: layout-closure-page-*.log, layout-asan3.log. Original failure is preserved
 in native/bootstrap/layout-asan2/library/compiler/tcdecl-translate.log.
 Reference: https://github.com/libffi/libffi/blob/v3.5.2/src/closures.c
 and https://github.com/libffi/libffi/blob/v3.5.2/src/x86/ffi64.c
+
+Expanded memory audit: generic-matrix.cyc currently fails with a confirmed
+ASan stack-buffer-overflow. Row strides of nested generic arrays still use
+the erased word width; this is the next memory-layout fix.

@@ -1,16 +1,38 @@
 #include "cyclone/library/std/core.h"
 using Core;
 struct Packed {
-  <`a::B>
+  <`a::B> : regions(`a) <= `H
   `a @p;
   `a expected;
 };
-static int inspect(struct Packed @box) {
+struct Envelope { struct Packed inner; };
+static `a read_value(`a @p) { return *p; }
+static struct Packed pack(`a @`H p,`a value : regions(`a) <= `H) {
+  struct Packed result={.p=p,.expected=value};
+  return result;
+}
+static int inspect(struct Packed @box,unsigned size) {
   let Packed{<`a> p,expected}=*box;
-  return *p==expected && sizeof(`a)==4 ? 0 : 1;
+  if(*p!=expected || sizeof(`a)!=size) return 1;
+  `a (@f)(`a @)=read_value;
+  if(f(p)!=expected) return 2;
+  *p=expected;
+  struct Packed repacked={.p=p,.expected=expected};
+  let Packed{<`b> q,copy}=repacked;
+  return *q==copy && sizeof(`b)==size ? 0 : 3;
+}
+static int nested(struct Envelope @box,unsigned size) {
+  let Envelope{Packed{<`a> p,expected}}=*box;
+  return *p==expected && sizeof(`a)==size ? 0 : 4;
 }
 static int value=-17;
+static long large=0x1234567800000012L;
+static struct Packed global_box={.p=&value,.expected=-17};
 int main(int argc,string_t ?argv) {
-  struct Packed box={.p=&value,.expected=-17};
-  return inspect(&box);
+  struct Packed small=pack(&value,value);
+  struct Packed wide=pack(&large,large);
+  if(inspect(&small,4) || inspect(&wide,8) || inspect(&global_box,4)) return 1;
+  struct Envelope a={.inner=small};
+  struct Envelope b={.inner=wide};
+  return nested(&a,4) || nested(&b,8) ? 2 : 0;
 }

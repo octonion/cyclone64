@@ -50,13 +50,24 @@ Remaining work — neither candidate is declared final
    Need consistent type-aware representation or specialization, including
    writes, escaping pointers, arrays and address-taking. Padding a reproducer
    or disabling sanitizer checks is not a repair.
-2. generic-callback.cyc: invoke(increment,2) still casts a concrete int(int)
-   callback to void*(void*) and calls through it. Clang's function sanitizer
-   reports the mismatch. Direct calls are fixed; function values need actual
-   ABI adapters (including function values forwarded or stored by libraries).
-   Investigate adapter generation in Toc at concrete-function-to-erased-function
-   conversions, with correct handling for nonconstant function pointers. Preserve
-   closure lifetime/identity and avoid merely suppressing function sanitization.
+2. Named callbacks now have real generated C adapters. The original
+   generic-callback.cyc passes Clang's function sanitizer. callback64.cyc covers
+   signed/unsigned returns, forwarded callbacks, repeated conversion identity,
+   pointer parameters/returns, void returns and an extern C unsigned-long call.
+   The native suite is now 13/13 PASS with ASan+UBSan emitted C/runtime and with
+   Clang undefined/function checks across emitted C/runtime/source stdlib.
+   callback-stage2 vs callback-stage3 converges 81/81 C files; upstream cyctest
+   passes using the new source stdlib. The runtime region cleanup now uses an
+   exact-signature wrapper, verified through region push/pop in allocator tests.
+   Runtime-selected function values still need adapters carrying the original
+   callable. generic-dynamic-callback.cyc reproduces this. The fully instrumented
+   compiler now gets past do_parse, region cleanup and Core::fst, then fails in
+   List::rmap_c on Tcutil::deep_copy_exp, passed through the local variable DC.
+   The precise current trace is native/logs/callback-clang4-smoke.log. Do not
+   replace local callback aliases merely to get this test past the sanitizer;
+   implement a general runtime callable adaptation mechanism. Libffi 3.5.2,
+   headers and local official documentation are installed and can support a
+   genuine ABI bridge for unknown function values. No libffi code is added yet.
 3. The normal runtime now has an explicitly selected system BDW-GC backend.
    A 256 MiB allocation stress test retained an interior-pointer root and kept
    the heap under 300 KiB. The GC-backed compiler rebuilt all 81 sources and
@@ -70,9 +81,8 @@ Remaining work — neither candidate is declared final
    narrowing, calloc and region/reap product overflow, page-size sums, and the
    fast region allocator's narrowing and zero/refcount handling. Direct allocator
    regressions pass GCC and GCC/Clang ASan+UBSan (Clang function sanitizer too).
-   Clang-instrumented full source compiler builds, but its first real translation
-   fails on the generic do_stage callback calling do_parse via the wrong C type.
-   This is the same unresolved ABI issue in item 2, now confirmed inside compiler.
+   The full Clang-instrumented compiler now has the remaining runtime-selected
+   callback failure described in item 2.
 4. Audit remaining pointer-width assumptions, proof/range arithmetic, integer
    constant folding, serialization and external ABI. Test full instrumented source
    compiler/stdlib, and obtain a 32-bit reference if feasible (local multilib absent).
@@ -116,3 +126,16 @@ scripts read it when linking. Changing a backend in place is rejected. Use new
 BUILD directories when changing instrumentation flags as well. CC and ARCH
 remain explicit overrides; BACKTRACE_CPPFLAGS can override the platform header
 path used for Clang's runtime_stacktrace.c compilation.
+
+Named-callback checkpoint evidence (2026-11-14)
+  native/bootstrap/callback-stage{1,2,3}/cyclone64 -- normal source stages
+  native/bootstrap/callback-clang4/cyclone64 -- full undefined/function checks
+  native/logs/callback-stage2-cyctest.log -- upstream PASS
+  native/logs/callback-convergence.json -- 81/81 identical
+  native/logs/callback-full-clang-probes.log -- 13/13 PASS
+  native/logs/callback-asan-probes.log -- 13/13 PASS
+  native/logs/callback-stage1-blockers.log -- dynamic callback and pointer FAIL
+  native/logs/callback-clang4-smoke.log -- first compiler failure is dynamic DC
+  native/logs/gc-allocation-clang.log -- exact-signature region cleanup PASS
+The desktop coredump count remains 30; last event is the old Nov13 17:31:39
+intentional region abort. No new desktop crash report was generated here.

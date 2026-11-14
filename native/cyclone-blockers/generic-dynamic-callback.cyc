@@ -1,0 +1,9 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `b invoke(`b (@f)(`a), `a x) { return f(x); }
+static int increment(int x) { return x+1; }
+static int decrement(int x) { return x-1; }
+int main(int argc, string_t ?argv) {
+  int (@f)(int) = argc==1 ? increment : decrement;
+  return invoke(f,2)==3 ? 0 : 1;
+}

@@ -57,6 +57,7 @@ int main(void) {
     REJECT(_region_calloc(NULL,aq,SIZE_MAX/2+1,2));
     for (unsigned plain=0;plain<2;++plain) {
       struct _RegionHandle r = _new_region(plain,"allocation-test");
+      _push_region(&r);
       p=_region_calloc(&r,aq,7,13);
       assert((uintptr_t)p % _Alignof(max_align_t)==0);
       for(int i=0;i<91;++i) assert(p[i]==0);
@@ -69,7 +70,7 @@ int main(void) {
         void *b=_fast_region_malloc(&r,aq,0);
         assert(a!=b);
       }
-      _free_region(&r);
+      _pop_region();
     }
   }
   extern int Cyc_set_default_region_page_size(size_t);

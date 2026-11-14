@@ -1122,6 +1122,90 @@ static stmt_t letdecl_to_c(env_t, pat_t, Tcpat::decision_opt_t, type_t, exp_t, s
 static void local_decl_to_c(env_t, vardecl_t, stmt_t);
 static void fndecl_to_c(env_t, fndecl_t, bool cinclude);
 
+// A cast does not adapt a C function's ABI. For a statically named callback,
+// emit a real function with the requested signature and convert at its call
+// boundary. Unknown function values require a representation carrying their
+// original callable and are deliberately left to the existing path for now.
+static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value) {
+  while (true) {
+    switch (value->r) {
+      case &Cast_e(_, inner, _, _): value = inner; continue;
+      case &Address_e(inner): value = inner; continue;
+      case &Instantiate_e(inner, _): value = inner; continue;
+      case &NoInstantiate_e(inner): value = inner; continue;
+      default: break;
+    }
+    break;
+  }
+  qvar_t source_name;
+  scope_t source_scope;
+  switch (value->r) {
+    case &Var_e(&Funname_b(fd)):
+      source_name = fd->name; source_scope = fd->sc; break;
+    case &Var_e(&Global_b(vd)):
+      if (!Tcutil::is_function_type(vd->type)) return NULL;
+      source_name = vd->name; source_scope = vd->sc; break;
+    default: return NULL;
+  }
+  type_t from = compress((type_t)value->topt);
+  type_t to = compress(target);
+  if (is_pointer_type(from)) from = compress(pointer_elt_type(from));
+  if (is_pointer_type(to)) to = compress(pointer_elt_type(to));
+  switch ($(from, to)) {
+    case $(&FnType(actual), &FnType(wanted)):
+      if (Tcutil::typecmp(from, to) == 0) return value;
+      if (actual.c_varargs || wanted.c_varargs || actual.cyc_varargs != NULL ||
+          wanted.cyc_varargs != NULL) return NULL;
+      for (let cache = ctxt->callback_adapters; cache != NULL; cache = cache->tl) {
+        let &$(name, ty, expression) = cache->hd;
+        if (qvar_cmp(name, source_name) == 0 && Tcutil::typecmp(ty, to) == 0)
+          return deep_copy(expression);
+      }
+      list_t<$(var_opt_t, tqual_t, type_t) @> params = NULL;
+      list_t<vardecl_t> variables = NULL;
+      list_t<vardecl_opt_t> optional_variables = NULL;
+      list_t<exp_t> args = NULL;
+      let a = actual.args;
+      for (let w = wanted.args; w != NULL; w = w->tl) {
+        if (a == NULL) return NULL;
+        let q = new $(Loc_n(), new (string_t) aprintf("_cyc_arg%X", ctxt->temp_var_counter++));
+        let ty = (*w->hd)[2];
+        let vd = new_vardecl(DL, q, ty, NULL, NULL);
+        let arg = set_type(varb_exp(new Param_b(vd), DL), ty);
+        if (Tcutil::typecmp(ty, (*a->hd)[2]) != 0) arg = cast_it((*a->hd)[2], arg);
+        params = new List(new $((var_opt_t)(*q)[1], (*w->hd)[1], ty), params);
+        variables = new List(vd, variables);
+        optional_variables = new List((vardecl_opt_t)vd, optional_variables);
+        args = new List(arg, args);
+        a = a->tl;
+      }
+      if (a != NULL || (is_void_type(actual.ret_type) && !is_void_type(wanted.ret_type)))
+        return NULL;
+      let call = set_type(fncall_exp(deep_copy(value), imp_rev(args), DL), actual.ret_type);
+      stmt_t body;
+      if (is_void_type(wanted.ret_type)) body = exp_stmt(call, DL);
+      else body = return_stmt(Tcutil::typecmp(actual.ret_type, wanted.ret_type) == 0
+                              ? call : cast_it(wanted.ret_type, call), DL);
+      let name = new $(Nmspace{.C_n = NULL},
+                       new (string_t) aprintf("_cyc_callback%X", ctxt->temp_var_counter++));
+      wanted.args = imp_rev(params);
+      wanted.arg_vardecls = imp_rev(optional_variables);
+      let fd = new Fndecl{.sc = Static, .is_inline = false, .name = name,
+                         .body = body, .i = wanted, .cached_type = new FnType(wanted),
+                         .param_vardecls = new Core::Opt(imp_rev(variables)),
+                         .fn_vardecl = NULL, .orig_scope = Static, .escapes = true};
+      // The source may be the enclosing function, which has not been emitted.
+      let prototype = new_vardecl(DL, source_name, from, NULL, NULL);
+      prototype->sc = source_scope;
+      ctxt->result_decls = new List(new_decl(new Var_d(prototype), DL), ctxt->result_decls);
+      ctxt->result_decls = new List(new_decl(new Fn_d(fd), DL), ctxt->result_decls);
+      let result = set_type(varb_exp(new Funname_b(fd), DL), target);
+      ctxt->callback_adapters = new List(new $(source_name, to, result), ctxt->callback_adapters);
+      return result;
+    default: return NULL;
+  }
+}
+
 static void asm_iolist_types_toc(toc_context_t ctxt, list_t<$(string_t, exp_t) @> l) {
   for (; l != NULL; l = l->tl)
     trans_exptypes(ctxt, (*l->hd)[1]);
@@ -2153,8 +2237,10 @@ void exp_to_c(env_t nv, exp_t e) {
               exp_to_c(nv, arg);
               if (formals != NULL) {
                 let expected = (*formals->hd)[2];
-                if (Tcutil::typecmp(expected, (type_t)arg->topt) != 0)
-                  actuals->hd = cast_it(expected, arg);
+                if (Tcutil::typecmp(expected, (type_t)arg->topt) != 0) {
+                  let adapter = callback_adapter(nv->ctxt, expected, arg);
+                  actuals->hd = adapter == NULL ? cast_it(expected, arg) : (exp_t)adapter;
+                }
                 formals = formals->tl;
               }
             }
@@ -2315,6 +2401,8 @@ void exp_to_c(env_t nv, exp_t e) {
       let tc  = typ_to_c(nv->ctxt, (type_t)old_typ);
       let tc1 = typ_to_c(nv->ctxt, (type_t)e1->topt);
       if (Tcutil::typecmp(tc, tc1) != 0) {
+        let adapter = callback_adapter(nv->ctxt, tc, e1);
+        if (adapter != NULL) { e->r = adapter->r; break; }
         // // HACK ALERT:
         // // gcc 3.4 refuses to compile a function call ( (t)f )(...)
         // // for types t that we need, so use ({(t)f})(...) instead.
@@ -2336,6 +2424,14 @@ void exp_to_c(env_t nv, exp_t e) {
       type_t new_typ_c = typ_to_c(nv->ctxt, new_typ);
       *t               = new_typ_c;
       exp_to_c(nv, e1);
+      if (Tcutil::typecmp(old_t2_c, new_typ_c) != 0) {
+        let adapter = callback_adapter(nv->ctxt, new_typ_c, e1);
+        if (adapter != NULL) {
+          e->r = adapter->r;
+          did_inserted_checks = true;
+          break;
+        }
+      }
       // a few Cyclone casts are translated into C effects other than casts:
       switch ($(compress(old_t2), compress(new_typ))) {
         case $(&PointerType(p1), &PointerType(p2)):
@@ -4877,7 +4973,8 @@ toc_context_t Toc_Ctx_create() {
     .aqualt_type_cache = NULL,
     .aliasable_qual_exp_cache = NULL,
     .get_exn_thrown_exp_cache = NULL,
-    .globals = NULL
+    .globals = NULL,
+    .callback_adapters = NULL
   };
 
   //  let RealNewDynamicRegion{dyn} = real_new_rckey();

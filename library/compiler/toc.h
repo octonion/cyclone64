@@ -87,6 +87,8 @@ namespace Toc {
 
     // Globals list
     stringptr_t ? globals;
+    // Reuse adapters so repeated conversions preserve callback identity.
+    list_t<$(qvar_t, type_t, exp_t) @> callback_adapters;
   };
   typedef struct TocContext *toc_context_t;
 

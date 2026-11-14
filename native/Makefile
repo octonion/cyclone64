@@ -96,7 +96,7 @@ $(BUILD)/check-runtime-bounds: native/compiler-checks/runtime-bounds.c library/r
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) -Ilibrary/std/cyc-lib $(filter %.c,$^) $(LDFLAGS) -o $@
 
-$(BUILD)/check-gc-allocation: native/compiler-checks/gc-allocation.c library/runtime/nogc.c library/runtime/runtime_memory.c library/runtime/bget.c library/std/cyc-lib/cyc_include.h
+$(BUILD)/check-gc-allocation: native/compiler-checks/gc-allocation.c library/runtime/nogc.c library/runtime/runtime_memory.c library/runtime/runtime_stack.c library/runtime/bget.c library/std/cyc-lib/cyc_include.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) -ffunction-sections -fdata-sections -Ilibrary/std/cyc-lib $(filter %.c,$^) -Wl,--gc-sections $(LDFLAGS) -o $@
 

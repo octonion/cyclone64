@@ -141,13 +141,17 @@ void _profile_free_region_cleanup(struct _RuntimeStack *handler) {
   _profile_free_region((struct _RegionHandle *)handler, NULL, NULL, 0);
 }
 
+static void free_region_cleanup(struct _RuntimeStack *frame) {
+  _free_region((struct _RegionHandle *)frame);
+}
+
 void _push_region(struct _RegionHandle *r) {
   // errprintf("pushing region %x\n",(unsigned int)r);
   r->s.tag = LIFO_REGION;
 #ifdef CYC_REGION_PROFILE
   r->s.cleanup = _profile_free_region_cleanup;
 #else
-  r->s.cleanup = (void (*)(struct _RuntimeStack *))_free_region;
+  r->s.cleanup = free_region_cleanup;
 #endif
   _push_frame((struct _RuntimeStack *)r);
 }

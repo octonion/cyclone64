@@ -351,11 +351,8 @@ int termhash(datatype Term @t) {
   return h;
 }
 
-static int intcmp(int a, int b) {
-  long long la = a;
-  long long lb = b;
-  return (la - lb) & 0xffffffff;
-}
+static int intcmp(int a, int b) { return a < b ? -1 : a > b ? 1 : 0; }
+static int uintcmp(unsigned a, unsigned b) { return a < b ? -1 : a > b ? 1 : 0; }
 
 int termcmp(datatype Term @`r1 _t1, datatype Term @`r2 _t2) {
   datatype Term @`r1 +`H t1 = _t1;
@@ -373,13 +370,13 @@ LOOP:
       int c = intcmp(i, j);
       if (c != 0)
         return c;
-      return intcmp(vd1, vd2);
+      return Absyn::cmp_ptr(vd1, vd2);
 
     case $(&Uint(i1, _), &Uint(i2, _)):
-      return i1 - i2;
+      return uintcmp(i1, i2);
 
     case $(&Proj(tm1, i1, _), &Proj(tm2, i2, _)):
-      int c = intcmp(i1, i2);
+      int c = uintcmp(i1, i2);
       if (c != 0)
         return c;
       t1 = tm1;
@@ -417,7 +414,7 @@ LOOP:
       return Evexp::exp_cmp(e1, e2);
 
     case $(&Addr(vd1, i1, _), &Addr(vd2, i2, _)):
-      int c = intcmp(vd1, vd2);
+      int c = Absyn::cmp_ptr(vd1, vd2);
       if (c != 0)
         return c;
       t1 = i1;
@@ -444,7 +441,7 @@ LOOP:
       goto LOOP;
 
     case $(&AggrUpdate(tm1, i1, v1), &AggrUpdate(tm2, i2, v2)):
-      int c = intcmp(i1, i2);
+      int c = uintcmp(i1, i2);
       if (c != 0)
         return c;
       c = termcmp(tm1, tm2);
@@ -460,7 +457,7 @@ LOOP:
       goto LOOP;
 
     case $(&Offsetf(tm1, i1, _), &Offsetf(tm2, i2, _)):
-      int c = intcmp(i1, i2);
+      int c = uintcmp(i1, i2);
       if (c != 0)
         return c;
       t1 = tm1;
@@ -468,7 +465,7 @@ LOOP:
       goto LOOP;
 
     case $(&Aggr(is_union1, tag1, ts1, _), &Aggr(is_union2, tag2, ts2, _)):
-      int c = intcmp(tag1, tag2);
+      int c = uintcmp(tag1, tag2);
       if (c != 0)
         return c;
       c = is_union2 - is_union1;
@@ -486,10 +483,10 @@ LOOP:
       return 1;
 
     case $(&Alloc(e1, i1, n1, v1, _), &Alloc(e2, i2, n2, v2, _)):
-      int c = intcmp(e1, e2);
+      int c = Absyn::cmp_ptr(e1, e2);
       if (c != 0)
         return c;
-      c = i1 - i2;
+      c = intcmp(i1, i2);
       if (c != 0)
         return c;
       c = termcmp(n1, n2);

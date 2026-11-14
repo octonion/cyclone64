@@ -6,6 +6,7 @@ stage=pathlib.Path(a.stage_dir);out=pathlib.Path(a.out);out.mkdir(parents=True,e
 cmd=json.loads((stage/'commands.json').read_text())[-1]
 if cmd[-2:]!=['-o',str(stage/'cyclone64')]: raise SystemExit('stage manifest has no final compiler link')
 cmd=[s for s in cmd if '/tools/cyclone/cyclone.o' not in s]
+if (stage/'library/compiler/toc.c').read_text().startswith('#define CYC_NATIVE_LAYOUTS'): cmd.insert(1,'-DCYC_NATIVE_LAYOUTS')
 cmd[1:1]=['-Ilibrary/std/cyc-lib','native/compiler-checks/pointer-compare.c'];cmd[-1]=str(out/'pointer-compare')
 (out/'commands.json').write_text(json.dumps([cmd,[cmd[-1]]],indent=2)+'\n')
 for label,argv in [('link',cmd),('run',[cmd[-1]])]:

@@ -61,7 +61,9 @@ $(BUILD)/config.o: $(BUILD)/config.c
 	$(CC) $(ARCH) $(CFLAGS) -c $< -o $@
 $(BUILD)/cyclone64: $(CYC_OBJECTS) $(BUILD)/config.o $(BUILD)/libbanshee64.a
 	$(CC) $(ARCH) $(CFLAGS) $^ $(LDFLAGS) $(CYC_LIBS) -o $@
--include $(CYC_OBJECTS:.o=.d)
+# Generator objects use the same runtime header; rebuild them when it changes.
+CYC_TOOL_OBJECTS := $(patsubst %.c,$(BUILD)/cyclone/%.o,$(wildcard stage0/tools/*/*.c))
+-include $(CYC_OBJECTS:.o=.d) $(CYC_TOOL_OBJECTS:.o=.d)
 
 RLIB_TESTS := $(addprefix $(BUILD)/rlib-test-,0 1 2 3 4 5 6 7)
 $(BUILD)/rlib-test-%: library/banshee/rlib/test/%/driver.c native/rlib-main.c $(BUILD)/libbanshee64.a

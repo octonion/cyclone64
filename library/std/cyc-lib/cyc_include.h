@@ -230,39 +230,29 @@ void *_zero_arr_inplace_plus_post_other_fn(unsigned, void **, ptrdiff_t, const c
 #define _check_fat_at_base(arr) (arr)
 #else
 #define _check_fat_subscript(arr, elt_sz, index) \
-  ({ \
-    struct _fat_ptr _cus_arr = (arr); \
-    __auto_type _cus_index = (index); \
-    size_t _cus_size = (elt_sz); \
-    uintptr_t _cus_base = (uintptr_t)_cus_arr.base; \
-    uintptr_t _cus_curr = (uintptr_t)_cus_arr.curr; \
-    uintptr_t _cus_end = (uintptr_t)_cus_arr.last_plus_one; \
-    if (!_cus_base || !_cus_size || _cus_curr < _cus_base || \
-        _cus_curr > _cus_end) _throw_arraybounds(); \
-    uintptr_t _cus_result; \
-    if (_cus_index < 0) { \
-      /* -(index+1) is representable even for the signed minimum. */ \
-      if (-(_cus_index + 1) >= (_cus_curr - _cus_base) / _cus_size) \
-        _throw_arraybounds(); \
-      size_t _cus_back = (size_t)(-(_cus_index + 1)) + 1; \
-      _cus_result = _cus_curr - _cus_back * _cus_size; \
-    } else { \
-      if (_cus_index >= (_cus_end - _cus_curr) / _cus_size) \
-        _throw_arraybounds(); \
-      _cus_result = _cus_curr + (size_t)_cus_index * _cus_size; \
-    } \
-    (unsigned char *)_cus_result; \
-  })
+  ({ struct _fat_ptr _cus_arr = (arr); \
+     __auto_type _cus_index = (index); size_t _cus_size = (elt_sz); \
+     uintptr_t _cus_base = (uintptr_t)_cus_arr.base; \
+     uintptr_t _cus_end = (uintptr_t)_cus_arr.last_plus_one; \
+     if (!_cus_base || !_cus_size || _cus_end < _cus_base || \
+         _cus_size > _cus_end - _cus_base) _throw_arraybounds(); \
+     /* Bounds constrain the selected element, not the temporary cursor. */ \
+     struct _fat_ptr _cus_shifted = _fat_ptr_plus(_cus_arr, _cus_size, _cus_index); \
+     uintptr_t _cus_result = (uintptr_t)_cus_shifted.curr; \
+     if (_cus_result < _cus_base || _cus_result > _cus_end - _cus_size) \
+       _throw_arraybounds(); \
+     (unsigned char *)_cus_result; })
 #define _untag_fat_ptr(arr, elt_sz, num_elts) ((arr).curr)
-#define _untag_fat_ptr_check_bound(arr, elt_sz, num_elts)                                  \
-  ({                                                                                       \
-    struct _fat_ptr _arr = (arr);                                                          \
-    unsigned char *_curr = _arr.curr;                                                      \
-    if (_curr != (unsigned char *)0 &&                                                     \
-        (_curr < _arr.base || _curr + _ptr_offset(elt_sz, num_elts) > _arr.last_plus_one)) \
-      _throw_arraybounds();                                                                \
-    _curr;                                                                                 \
-  })
+#define _untag_fat_ptr_check_bound(arr, elt_sz, num_elts) \
+  ({ struct _fat_ptr _ufp = (arr); size_t _ufp_size = (elt_sz); \
+     __auto_type _ufp_count = (num_elts); \
+     uintptr_t _ufp_curr = (uintptr_t)_ufp.curr; \
+     uintptr_t _ufp_base = (uintptr_t)_ufp.base; \
+     uintptr_t _ufp_end = (uintptr_t)_ufp.last_plus_one; \
+     if (_ufp_curr && (!_ufp_size || _ufp_curr < _ufp_base || \
+         _ufp_curr > _ufp_end || _ufp_count < 0 || \
+         _ufp_count > (_ufp_end - _ufp_curr) / _ufp_size)) _throw_arraybounds(); \
+     _ufp.curr; })
 #define _check_fat_at_base(arr)   \
   ({                              \
     struct _fat_ptr _arr = (arr); \
@@ -272,15 +262,17 @@ void *_zero_arr_inplace_plus_post_other_fn(unsigned, void **, ptrdiff_t, const c
   })
 #endif
 
-#define _tag_fat(tcurr, elt_sz, num_elts)                                              \
-  ({                                                                                   \
-    struct _fat_ptr _ans;                                                              \
-    ptrdiff_t _num_elts = (num_elts);                                                  \
-    _ans.base = _ans.curr = (void *)(tcurr);                                           \
-    /* JGM: if we're tagging NULL, ignore num_elts */                                  \
-    _ans.last_plus_one = _ans.base ? (_ans.base + _ptr_offset(elt_sz, _num_elts)) : 0; \
-    _ans;                                                                              \
-  })
+#define _tag_fat(tcurr, elt_sz, num_elts) \
+  ({ struct _fat_ptr _tf; size_t _tf_size = (elt_sz); \
+     __auto_type _tf_count = (num_elts); \
+     _tf.base = _tf.curr = (void *)(tcurr); \
+     uintptr_t _tf_base = (uintptr_t)_tf.base; \
+     /* A null pointer has no extent, regardless of the supplied count. */ \
+     if (_tf_base && (!_tf_size || _tf_count < 0 || \
+         _tf_count > (UINTPTR_MAX - _tf_base) / _tf_size)) _throw_arraybounds(); \
+     _tf.last_plus_one = _tf_base ? \
+       (unsigned char *)(_tf_base + (uintptr_t)_tf_count * _tf_size) : NULL; \
+     _tf; })
 
 /* Cyclone permits temporary out-of-bounds fat pointers (p+11-10).
  * Keep their address arithmetic in uintptr_t, without C out-of-object pointer

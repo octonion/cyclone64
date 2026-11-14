@@ -18,5 +18,11 @@ int main(int argc, string_t ?argv) {
   if (a[small] != 30 || thin[small] != 30 || z[small] != 'c') return 2;
   int ?tail=a+2;
   if (tail[-2L] != 10) return 3;
+  int ?before=a-1;
+  if(before[1]!=10 || before[3]!=30) return 4;
+  int ?after=a+7;
+  if(after[-7]!=10 || after[-5]!=30) return 5;
+  try { int value=before[0]; return 18; } catch { default: break; }
+  try { int value=after[-4]; return 19; } catch { default: break; }
   return 0;
 }

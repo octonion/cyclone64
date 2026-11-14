@@ -537,7 +537,7 @@ void f100() {
 }
 
 void f101() {
-  // expecting unsigned int, found $(int,int)
+  // expecting an integral array bound, found $(int,int)
   int ?x = new {for i < $(1,2) : 3};
 }
 

@@ -36,15 +36,16 @@ for ref in ([] if a.skip_diagnostics else sorted(pathlib.Path('testsuite/compile
     src = ref.with_suffix('.cyc'); pre = out / (src.stem + '.cyp')
     q = run([a.cc, '-nostdinc', '-x', 'c', '-E', '-isystem', 'testsuite/compiler/lib', src, '-o', pre], src.stem + '-cpp')
     if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue
-    q = run([compiler, '--manyerrors', pre, '-o', '/dev/null'], src.stem)
+    q = run([compiler, *shlex.split(a.compiler_flags), '--manyerrors', pre, '-o', '/dev/null'], src.stem)
     got = (q.stdout + q.stderr).replace('testsuite/compiler/', 'cyclone/testsuite/compiler/')
     expected = ref.read_text()
     (out / (src.stem + '.diff')).write_text(''.join(difflib.unified_diff(expected.splitlines(True), got.splitlines(True))))
-    results.append((src.stem, 'PASS' if got == expected else f'DIFF (exit {q.returncode})'))
+    expected_exit = 1 if 'COMPILATION FAILED!' in expected else 0
+    results.append((src.stem, 'PASS' if got == expected and q.returncode == expected_exit else f'DIFF (exit {q.returncode}, expected {expected_exit})'))
 # Overflow must be diagnosed rather than silently wrapping in the lexer.
 for src in ([] if a.skip_rejections else sorted(pathlib.Path('native/cyclone-reject').glob('*.cyc'))):
     (out/(src.stem+'.c')).unlink(missing_ok=True)
-    q = run([compiler, '-o', out / (src.stem + '.c'), src], src.stem)
+    q = run([compiler, *shlex.split(a.compiler_flags), '-o', out / (src.stem + '.c'), src], src.stem)
     ok = q.returncode == 1 and 'integer constant too large' in q.stdout + q.stderr
     results.append((src.stem, 'PASS' if ok else f'REJECTION FAIL ({q.returncode})'))
 objects = sorted((build / 'cyclone/stage0/library/std').rglob('*.o')) + runtime_objects(build)

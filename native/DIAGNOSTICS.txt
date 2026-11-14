@@ -1,0 +1,25 @@
+Audited native compiler diagnostic expectations, 2026-11-14
+
+Three historical references were updated after comparing the complete output:
+
+1. fail1.cyc:541: the invalid tuple array bound is still rejected. The message
+   now says "expecting an integral array bound" instead of "expecting unsigned
+   int", reflecting the intentional acceptance of wider integral counts before
+   checked allocation. All other fail1 diagnostics remain unchanged.
+2. fail3.cyc:150: the aliased pattern is still rejected. The reported column is
+   now 26, the actual start of "unew", instead of the old off-by-one column 27.
+   The error wording and all other diagnostics remain unchanged.
+3. zeroptr.cyc is valid: returning integer zero through a pointer typedef now
+   compiles instead of crashing the compiler with an internal Null_Exception.
+   Its expected output is empty and expected exit is zero. null-alias.cyc checks
+   both thin and fat null typedef conversions at runtime.
+
+The runner now checks exit status as well as exact text, so a silent compiler
+failure cannot pass an empty reference. It also applies explicit compiler flags
+consistently to diagnostic, rejection and executable inputs.
+
+All eight exact diagnostic references pass with wide-proof4. Before/after logs:
+  native/compiler-tests/wide-proof4-diagnostics/*.diff
+  native/compiler-tests/wide-proof4-diagnostics-updated/results.txt
+Original expectations remain in Git history and the detached historical ILP32
+reference checkout. No unrelated diagnostic change was accepted.

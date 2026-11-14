@@ -22,7 +22,7 @@ cyclone/testsuite/compiler/fail3.cyc:132:2: function consumes value pointed to b
 cyclone/testsuite/compiler/fail3.cyc:136:2: function parameter y without 'consume' attribute no longer set to its original value
 cyclone/testsuite/compiler/fail3.cyc:141:3: attempt to dereference an alias-free that has already been copied
 cyclone/testsuite/compiler/fail3.cyc:146:11: attempt to dereference a consumed alias-free pointer
-cyclone/testsuite/compiler/fail3.cyc:150:27: aliased pattern expression not an l-value: qnew (Core::unique_qual)1
+cyclone/testsuite/compiler/fail3.cyc:150:26: aliased pattern expression not an l-value: qnew (Core::unique_qual)1
 cyclone/testsuite/compiler/fail3.cyc:155:6: cannot track alias-free pointers through multiple assignments
 cyclone/testsuite/compiler/fail3.cyc:160:14: expression attempts to copy a consumed alias-free value
 cyclone/testsuite/compiler/fail3.cyc:168:11: expression attempts to copy a consumed alias-free value

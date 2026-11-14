@@ -110,7 +110,7 @@ cyclone/testsuite/compiler/fail1.cyc:536:12: type mismatch: expecting double but
 cyclone/testsuite/compiler/fail1.cyc:536:12: elements of array do not all have the same type (double)
 cyclone/testsuite/compiler/fail1.cyc:536:2: x was declared with type $(int,int) [3U] but initialized with type double [3U]
   $(int,int) and double are not compatible. 
-cyclone/testsuite/compiler/fail1.cyc:541:24: expecting unsigned int, found $(int,int)
+cyclone/testsuite/compiler/fail1.cyc:541:24: expecting an integral array bound, found $(int,int)
 cyclone/testsuite/compiler/fail1.cyc:553:2: can't construct abstract struct F103
 cyclone/testsuite/compiler/fail1.cyc:560:2: too many explicit witness types
 cyclone/testsuite/compiler/fail1.cyc:565:17: field x of struct F104 expects type int != $(int,int)

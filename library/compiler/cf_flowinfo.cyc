@@ -119,16 +119,16 @@ loop:
 }
 
 int root_cmp(root_t r1, root_t r2) {
-  if ((int)r1 == (int)r2)
+  if (r1 == r2)
     return 0;
 
   switch ($(r1, r2)) {
     case $(&VarRoot(vd1), &VarRoot(vd2)):
-      return (int)vd1 - (int)vd2;
+      return Absyn::cmp_ptr(vd1, vd2);
     case $(&MallocPt(e1, _), &MallocPt(e2, _)):
-      return (int)e1 - (int)e2;
+      return Absyn::cmp_ptr(e1, e2);
     case $(&InitParam(i1, _), &InitParam(i2, _)):
-      return i1 - i2;
+      return Core::intcmp(i1, i2);
 
     case $(&VarRoot(_), _):
       return -1;
@@ -163,7 +163,7 @@ static int pathcon_cmp(pathcon_t p1, pathcon_t p2) {
 static int path_cmp(path_t path1, path_t path2) { return list_cmp(pathcon_cmp, path1, path2); }
 
 int place_cmp(place_t p1, place_t p2) {
-  if ((int)p1 == (int)p2)
+  if (p1 == p2)
     return 0;
   let Place{root1, path1} = *p1;
   let Place{root2, path2} = *p2;

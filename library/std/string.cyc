@@ -165,7 +165,7 @@ int zstrncmp(buffer_t s1, buffer_t s2, size_t n) {
 
 // like zstrcmp but operates on pointers -- useful for hashtables
 int zstrptrcmp(stringptr_t a, stringptr_t b) {
-  if ((int)a == (int)b)
+  if ((unsigned long)a == (unsigned long)b)
     return 0;
   return (zstrcmp(*a, *b));
 }

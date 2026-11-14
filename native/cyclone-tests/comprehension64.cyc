@@ -1,0 +1,25 @@
+#include "cyclone/library/std/core.h"
+using Core;
+extern "C" unsigned long abi_large_index(void);
+extern "C" void GC_free(void *);
+int main(int argc, string_t ?argv) {
+  unsigned long count=abi_large_index()+15UL;
+  region r;
+  try { int ?p=rnew(r) {for i<count:0}; return 1; }
+  catch { case &Bad_alloc: break; default: return 99; }
+  __uint128_t wide=((__uint128_t)1 << 100)+16;
+  try { int ?p=rnew(r) {for i<wide:0}; return 2; }
+  catch { case &Bad_alloc: break; default: return 99; }
+  unsigned long small=3;
+  int ?p=rnew(r) {for i<small++:(int)i};
+  if(small!=4 || numelts(p)!=3 || p[2]!=2) return 3;
+  unsigned long full=18446744073709551615UL;
+  try { char ?@zeroterm z=rnew(r) {for i<full:'x'}; return 4; }
+  catch { case &Bad_alloc: break; default: return 99; }
+  char ?@zeroterm z=rnew(r) {for i<3:'x'};
+  if(numelts(z)!=4 || z[2]!='x' || z[3]!=0) return 5;
+  char ?@zeroterm heap=new {for i<3:'x'};
+  if (numelts(heap)!=4 || heap[2]!='x' || heap[3]!=0) return 6;
+  GC_free((void *)heap);
+  return 0;
+}

@@ -2118,8 +2118,10 @@ static type_t tcComprehension(Tc::tc_context_t ctx, tenv_t te, seg_t loc, type_t
       }
       break;
     default:
-      if (!coerce_uint_type(bound))
-        Warn::err2(bound->loc, "expecting unsigned int, found ", bound->topt);
+      // Preserve width until Toc validates the allocation bound. Narrowing
+      // here would turn a count above 2^32 into a small valid allocation.
+      if (!is_integral_type((type_t)bound->topt))
+        Warn::err2(bound->loc, "expecting an integral array bound, found ", bound->topt);
   }
   // double-check that the index variable x is declared const
   if (!vd->tq.real_const)
@@ -2170,8 +2172,10 @@ static type_t tcComprehensionNoinit(Tc::tc_context_t ctx, tenv_t te, seg_t loc, 
       }
       break;
     default:
-      if (!coerce_uint_type(bound))
-        Warn::err2(bound->loc, "expecting unsigned int, found ", bound->topt);
+      // Preserve width until Toc validates the allocation bound. Narrowing
+      // here would turn a count above 2^32 into a small valid allocation.
+      if (!is_integral_type((type_t)bound->topt))
+        Warn::err2(bound->loc, "expecting an integral array bound, found ", bound->topt);
   }
   let $(topt2, tqopt, ztopt) = ptrEltAtts(topt);
 

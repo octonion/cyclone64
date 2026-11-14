@@ -1,0 +1,25 @@
+#include "cyclone/library/std/core.h"
+#include "cyclone/library/std/hashtable.h"
+using Core;
+namespace Hashtable {
+  extern `b *`r lookup_ptr_opt(table_t<`a,`b,`r>, `a);
+}
+extern "C" void *abi_pointer_at(unsigned long);
+static int hash(void *p) { return 0; }
+int main(int argc, string_t ?argv) {
+  void *a=abi_pointer_at(0x100000000UL);
+  void *b=abi_pointer_at(0x200000000UL);
+  // Opaque pointer identities are compared but never dereferenced.
+  if (!a || !b) return 1;
+  if ((a ? 7 : 0)!=7) return 2;
+  if (Core::nptrcmp(a,b)>=0 || Core::nptrcmp(b,a)<=0) return 3;
+  if (Core::intcmp(-2147483647-1,2147483647)>=0) return 4;
+  region r;
+  let t=Hashtable::rcreate(r,7,Core::nptrcmp,hash);
+  Hashtable::insert(t,a,11);
+  Hashtable::insert(t,b,22);
+  let pa=Hashtable::lookup_ptr_opt(t,a);
+  let pb=Hashtable::lookup_ptr_opt(t,b);
+  if (pa==NULL || pb==NULL || *pa!=11 || *pb!=22) return 5;
+  return 0;
+}

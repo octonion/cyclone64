@@ -2940,7 +2940,7 @@ static term_t unify_term(accum_t @`r accum, term_t ta, term_t tb) {
                              proj(aggr_update(tb, bi, bv), ai, get_term_type(av)));
         return unify_term(accum, t1, t2);
       }
-    case $(&Addr(ax, ai, atopt), &Addr(bx, bi, btopt)) && (int)ax == (int)bx:
+    case $(&Addr(ax, ai, atopt), &Addr(bx, bi, btopt)) && (unsigned long)ax == (unsigned long)bx:
       let i = unify_term(accum, ai, bi);
       return addr(ax, i);
     // FIX: we should make the "id" field of Alloc's a term instead of

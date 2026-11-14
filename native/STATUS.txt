@@ -1,218 +1,124 @@
-Latest checkpoint — dynamic callable ABI and stable C types (2026-11-14)
+Native Banshee64 / Cyclone64 — current checkpoint, 2026-11-14
 
-Banshee64 remains a tested standalone native library candidate. The 7 native
-regressions and 8 region tests pass again with GCC 15.2. Earlier ASan/UBSan,
-Clang and GCC 14 runs are retained. Persistence is trusted same-build data;
-unsupported custom/flowrow codecs and serialize_cs are not claimed implemented.
+Goal: ACTIVE. Continue to satisfactory candidates without routine prompting.
+Branch: native-lp64-seymour. Historical base:
+  c19c449365671fa10acad6307a95ffffae86dc69
+Source and all work remain isolated under work/cyclone. No existing checkout or
+system package installation was overwritten. Earlier evidence remains in logs
+and Git history; only results listed below describe the current checkpoint.
 
-Cyclone64 is still under conversion, NOT a satisfactory final candidate:
-- Dynamic function values, generic callback fields, higher-order arguments and
-  results use a libffi ABI bridge. Constant global initializers use static C
-  wrappers registered by constructors. Equality resolves original functions.
-- Anonymous aggregate C names derive from SHA-256 of their structural fields.
-  This fixes incompatible C tags for the same logical tuple across modules.
-- Full compiler + standard library + upstream cyctest pass Clang's undefined
-  and function sanitizers. The 13 native checks pass. Callback bridge and
-  digest units pass ASan/UBSan/function, with leak checking enabled.
-- ffi-equal7 and ffi-equal8 converge: all 81 generated C files byte-identical.
-  Earlier stages differed in inferred bounds checks; only the final pair is
-  cited as convergence evidence.
-- Test/build drivers remove stale outputs and record commands. Missing compiler
-  executables fail before GDB starts; stale generated C cannot count as success.
-- New dependencies: libffi for runtime callback adaptation, libcrypto for
-  compiler-only deterministic anonymous type names. Both are explicit in
-  native runtime manifests; standalone Banshee does not depend on either.
-- Desktop coredump count remains 30, with no new reports from this work.
+Banshee64
+- A tested standalone native library candidate: native/build/libbanshee64.a.
+- Seven native regression programs and eight region tests pass with GCC 15.2.
+  Prior GCC 14, Clang, ASan/UBSan and no-debug variants passed and remain logged.
+  Coverage includes region allocation, constraints, unification, SetIF/SetST,
+  rollback, persistence and reset/reinitialization.
+- Persistence supports trusted same-build data. Custom/flowrow codecs and the
+  serialize_cs stub are not advertised as implemented or portable formats.
+- Standalone Banshee has no dependency on libffi, libcrypto or system GC.
+  Most recent unchanged-library check: native/logs/ffi-banshee-regression.log.
 
-Precise remaining failures:
-1. generic-pointer.cyc: erased void** reads/writes a plain four-byte int;
-   alignment and width are wrong. Generic arrays, stride, nested and escaping
-   pointers require a consistent representation or specialization.
-2. allocation-count.cyc: malloc/calloc/region fat-pointer counts are narrowed
-   to unsigned int before checked allocation. A count above 2^32 becomes small.
-3. Callback ABI descriptors reject unsupported unions, bitfields, int128 and
-   variadic conversions explicitly. Aggregate conversion beyond identical
-   descriptions is not implemented. Cache/closure records live for process
-   lifetime; explicit shutdown is only safe when all callers have ceased.
-4. Production GC heap objects do not have malloc-ASan redzones. Direct allocator
-   and callback units cover those with malloc instrumentation. The full ASan
-   system-GC compiler, source stdlib/runtime and upstream suite now PASS.
-   Live mmap-backed libffi closure records are registered as LSan roots and
-   unregistered on destruction; an intentional 73-byte leak remains detected.
-   BDW-GC 8.2.12 cannot scan ASan fake stacks. The system-GC bridge supplies
-   upstream's detect_stack_use_after_return=0 default (with detect_leaks=true),
-   confirmed from ASan's option report. This avoids premature collection of
-   live objects. Malloc-backed units keep use-after-return instrumentation.
-   See https://github.com/bdwgc/bdwgc/blob/v8.2.12/os_dep.c#L479-L500.
-   Applications with their own ASan defaults can build the bridge with
-   CYC_CUSTOM_ASAN_DEFAULTS, but must preserve this collector constraint.
+Cyclone64 — useful native builds, still NOT a satisfactory final candidate
+- Latest GCC 15.2 / -march=native build:
+    native/bootstrap/identity-gcc/cyclone64
+- Fully instrumented compiler:
+    native/bootstrap/ffi-identity4/cyclone64
+  Clang ASan, undefined and function sanitizers; system BDW-GC backend.
+- Full native bootstrap converges: ffi-identity3 and ffi-identity4 have all
+  81 generated C files byte-identical. The latter was generated by the fully
+  instrumented preceding compiler; all 81 translations and C builds passed.
+- Upstream cyctest passes with GCC and with fully instrumented compiler,
+  generated tests, standard library and system-GC runtime.
+- Sixteen native checks pass: twelve programs plus four literal rejections.
+  They also pass with exact malloc-backed ASan redzones, leak detection and
+  use-after-return checking in generated programs and source standard library.
+- Compiler-pointer ordering unit passes on GCC and Clang ASan/function builds.
+  It covers identical low 32 address bits, ordering and signed integer extremes.
 
-A historical 32-bit reference is now available in ../cyclone-reference32,
-at c19c449365671fa10acad6307a95ffffae86dc69, with a clean source worktree.
-Downloaded multilib packages were extracted into ../reference32-sysroot;
-nothing was installed into the workstation. Its checked-in-C compiler builds
-and generic pointer/callback/tuple behavior probes pass. Native-only overflow
-rejection wording is different and is not included in those common probes.
+Latest verified repairs
+- Allocation counts remain wide through validation, including 128-bit counts,
+  negative values, malloc/calloc, region allocation and comprehensions. Bounds
+  with effects are evaluated once. Generated C prints 128-bit integer types.
+- Zero-terminated comprehensions initialize the requested number of elements
+  and place their terminator inside the allocation. An old compiler reproduces
+  a one-byte heap-buffer-overflow using the exact malloc-backed runtime.
+- The malloc backend allocates exactly the declared payload, without its old
+  undocumented extra byte; its realloc, zero-size and overflow units pass.
+- Flow analysis, expression/type comparison and standard-library identity paths
+  preserve all address bits. Comparators use ordering instead of overflowing
+  truncated subtraction. Pointer-to-boolean coercion no longer loses high bits.
+- Earlier callback fixes remain verified: dynamic values, generic fields,
+  higher-order arguments/results, globals, identity, null checks, static wrapper
+  registration, and deterministic structural names for anonymous C aggregates.
 
-Latest evidence:
-  native/logs/ffi-gc-stack-cyctest2.log
-  native/compiler-tests/ffi-gc-stack-cyctest2/run.log
-  native/logs/ffi-root-asan-probes.log
-  native/logs/ffi-root-results.json (shutdown/live cache/leak negative control)
+Remaining confirmed language blocker: generic memory representation
+- generic-pointer: erased void** reads/writes a four-byte int.
+- generic-nested-reference: the inner dereference has the same width problem.
+- generic-array: erased elements use eight-byte stride for packed int arrays.
+- generic-escaping-reference: returned element references select the wrong slot.
+- All four fail native sanitizer/behavior tests and pass unchanged on the
+  historical ILP32 reference. The original generic callback/tuple comparisons
+  also pass there, for six common reference probes total.
+- native/experimental/polyref.{c,h} is a tested mechanism prototype, NOT wired
+  into Toc or a shipping runtime ABI. It preserves storage width, bounds,
+  nested references, mutation and identity. Wrappers alone are insufficient:
+  generic allocation and sizeof require concrete layout propagation as well.
+  Integration requirements are in native/experimental/GENERIC-REFERENCES.txt.
+- libffi conversions explicitly reject unsupported variadic, union, bitfield
+  and int128 callback signatures. Distinct by-value aggregate conversions and
+  broader foreign-thread integration still need work/audit.
+
+Sanitizer/GC contract
+- Production BDW-GC collects objects and preserves interior roots; collection
+  stress remains passing. Its heap does not provide malloc-ASan redzones.
+- BDW-GC 8.2.12 does not scan ASan fake stacks. The system-GC bridge supplies its
+  upstream detect_stack_use_after_return=0 default. Leak checking remains true.
+  The malloc backend keeps use-after-return checks and exact allocation bounds.
+  Source: https://github.com/bdwgc/bdwgc/blob/v8.2.12/os_dep.c#L479-L500
+- mmap-backed live libffi closure records are registered as LSan roots, and
+  unregistered on release. Both shutdown and live-cache tests pass. A deliberate
+  73-byte leak is still detected by the negative-control test. No leak-ignore
+  lists or detect_leaks=0 settings are used.
+- Callback cache records live for process lifetime. Explicit shutdown requires
+  quiescent callers. GC and libffi are selected/linked through build manifests.
+- libffi is a runtime dependency; libcrypto supplies compiler-only type digests.
+
+Historical 32-bit reference
+- Clean detached checkout: ../cyclone-reference32 at the historical base.
+- Executable: ../reference32-build/cyclone32.
+- Multilib packages were downloaded and extracted into ../reference32-sysroot;
+  nothing was installed system-wide. Reproduction: native/REFERENCE32.txt.
+- Native-only overflow diagnostics differ in the old compiler; common behavior
+  probes intentionally omit those new diagnostics, with the original run logged.
+
+Evidence and reproduction (from repository root)
+  native/logs/ffi-identity-convergence34.json
+  native/logs/identity-gcc-clang-code.json
+  native/logs/identity-exact-asan-probes.log
+  native/logs/identity-gcc-probes.log
+  native/logs/identity4-cyctest.log
+  native/logs/identity-gcc-cyctest.log
+  native/logs/identity4-pointer-unit.log
+  native/logs/identity-gcc-pointer-unit.log
+  native/logs/generic-reference-baseline2.log
+  native/logs/reference32-expanded.log
+  native/logs/comprehension-asan-overrun-baseline.log
+  native/compiler-tests/comprehension-asan-overrun-baseline/comprehension-overrun-run.log
+  native/logs/pointer-compare-baseline.log
+  native/logs/identity-bool-baseline.log
+  native/logs/nogc-exact-unit.log
+  native/logs/ffi-root-results.json
   native/logs/ffi-asan-options.log
-  native/logs/ffi-asan-gc-collection.log
-  native/logs/ffi-equal-convergence.json
-  native/logs/ffi-equal8-cyctest.log
-  native/compiler-tests/ffi-equal8-cyctest/run.log
-  native/logs/ffi-equal-probes.log
-  native/logs/ffi-equality-unit.log
-  native/logs/ffi-units.log
-  native/logs/ffi-banshee-regression.log
-  native/logs/ffi-static-higher.log (known allocation + pointer failures)
-  native/logs/reference32-common.log
-  native/REFERENCE32.txt
+  native/logs/polyref-unit.log
 
-The persistent goal remains ACTIVE. Older sections below are historical
-checkpoints, not the current unresolved callback status.
+  native/run-cyclone-tests.py --skip-diagnostics --build native/ffi2-gc \
+    --stage-dir native/bootstrap/identity-gcc
+  native/run-cyctest.py --build native/ffi2-gc \
+    --stage-dir native/bootstrap/identity-gcc
+  python3 native/run-pointer-compare.py --stage-dir native/bootstrap/ffi-identity4 \
+    --out native/compiler-tests/identity4-pointer-unit
 
-Native Banshee64 / Cyclone64 ongoing goal — checkpoint 2026-11-14
-
-The user explicitly requested autonomous continuation until satisfactory
-candidates exist. The persistent goal is ACTIVE. Commits and status reports
-are checkpoints; known conversion bugs are not a reason to declare completion.
-
-Current verified progress (after fe958fa)
-- Wide pointer +, -, +=, -= and pointer differences preserve the offset width.
-  Fat-pointer arithmetic uses checked uintptr_t magnitudes, including signed
-  minima, unsigned maxima and 128-bit offsets, without creating C pointer
-  arithmetic outside an allocation. Temporary out-of-bounds addresses remain
-  reversible as required by Cyclone; address-space wrap is rejected.
-- Concrete tuples now use word slots for boxed-kind fields, matching generic
-  tuples. Reads, initializers, writes, patterns, address-taking, compound ops,
-  pre/post increment and zero-extended 32-bit scalar representations are covered.
-  C-compatible named structures keep their original field layout.
-- Generated C must be compiled with -fno-strict-aliasing: boxed word slots have
-  typed views, as already used in polymorphic named structures. The native
-  bootstrap and test tools now set this explicitly. This is a backend contract,
-  not a disabled sanitizer. C arithmetic on ints still has 32-bit semantics.
-- Direct instantiated calls now call the actual erased C prototype and convert
-  arguments/results. They no longer cast the callee to an incompatible prototype.
-  Nested numeric casts are retained instead of indiscriminately discarded.
-- Upstream cyctest: ALL TESTS PASSED using erasure-stage2, including Fn currying.
-- Eight native programs plus four overflow rejection tests: 12/12 PASS with GCC,
-  with instrumented emitted C/runtime under ASan+UBSan, and under Clang's
-  undefined/function sanitizer. The complete source compiler and stdlib have
-  not yet been validated with Clang's function sanitizer; see callback blocker.
-- erasure-stage2 vs erasure-stage3: 81/81 generated C files byte-identical.
-- Direct runtime bounds/arithmetic tests pass GCC, Clang and ASan/UBSan.
-- Early executions of newly built compiler ABIs use native/run-compiler-under-gdb.sh
-  to contain unexpected fatal signals. No global crash configuration changes.
-
-Current compilers and evidence
-  native/bootstrap/erasure-stage{1,2,3}/cyclone64
-  native/logs/erasure-stage2-probes.log
-  native/logs/erasure-stage2-cyctest.log
-  native/compiler-tests/erasure-stage2-cyctest/run.log
-  native/logs/erasure-asan-probes.log
-  native/logs/erasure-clang-probes.log
-  native/logs/erasure-clang-blockers.log
-  native/logs/erasure-convergence.json
-  native/logs/pointer-runtime-{tests,asan,clang}.log
-
-Remaining work — neither candidate is declared final
-1. generic-pointer.cyc: generic dereference reads a pointer word from a plain
-   four-byte int object. UBSan reports insufficient object space. This includes
-   the broader question of representation/stride across generic pointers and
-   arrays; fixing concrete tuple slots does not solve all erased memory views.
-   Need consistent type-aware representation or specialization, including
-   writes, escaping pointers, arrays and address-taking. Padding a reproducer
-   or disabling sanitizer checks is not a repair.
-2. Named callbacks now have real generated C adapters. The original
-   generic-callback.cyc passes Clang's function sanitizer. callback64.cyc covers
-   signed/unsigned returns, forwarded callbacks, repeated conversion identity,
-   pointer parameters/returns, void returns and an extern C unsigned-long call.
-   The native suite is now 13/13 PASS with ASan+UBSan emitted C/runtime and with
-   Clang undefined/function checks across emitted C/runtime/source stdlib.
-   callback-stage2 vs callback-stage3 converges 81/81 C files; upstream cyctest
-   passes using the new source stdlib. The runtime region cleanup now uses an
-   exact-signature wrapper, verified through region push/pop in allocator tests.
-   Runtime-selected function values still need adapters carrying the original
-   callable. generic-dynamic-callback.cyc reproduces this. The fully instrumented
-   compiler now gets past do_parse, region cleanup and Core::fst, then fails in
-   List::rmap_c on Tcutil::deep_copy_exp, passed through the local variable DC.
-   The precise current trace is native/logs/callback-clang4-smoke.log. Do not
-   replace local callback aliases merely to get this test past the sanitizer;
-   implement a general runtime callable adaptation mechanism. Libffi 3.5.2,
-   headers and local official documentation are installed and can support a
-   genuine ABI bridge for unknown function values. No libffi code is added yet.
-3. The normal runtime now has an explicitly selected system BDW-GC backend.
-   A 256 MiB allocation stress test retained an interior-pointer root and kept
-   the heap under 300 KiB. The GC-backed compiler rebuilt all 81 sources and
-   passed all 12 native probes and the upstream executable suite. A fresh
-   stage0 -> gc-fresh1 -> gc-fresh2 -> gc-fresh3 bootstrap converged 81/81 C files.
-   The malloc-backed nogc option remains for ASan's allocation redzones; it still
-   retains unfreed compiler objects for process lifetime and reports them to
-   LSan. No leak suppression was added. Broader GC/foreign-root stress remains
-   part of validation; a collector switch alone does not prove every root safe.
-   Fixed the reproduced nogc realloc header overflow, NULL realloc/free, size_t
-   narrowing, calloc and region/reap product overflow, page-size sums, and the
-   fast region allocator's narrowing and zero/refcount handling. Direct allocator
-   regressions pass GCC and GCC/Clang ASan+UBSan (Clang function sanitizer too).
-   The full Clang-instrumented compiler now has the remaining runtime-selected
-   callback failure described in item 2.
-4. Audit remaining pointer-width assumptions, proof/range arithmetic, integer
-   constant folding, serialization and external ABI. Test full instrumented source
-   compiler/stdlib, and obtain a 32-bit reference if feasible (local multilib absent).
-   Old diagnostic references retain one-column fail3 difference and an expected
-   zeroptr internal exception that has now been fixed.
-5. Fresh bootstrap is now verified as described above. Repeat it after callback
-   and generic-pointer representation changes. Do not mix regenerated individual
-   Long_c/tuple modules into the older checked-in stage0 ABI.
-
-Reproduction for current language checks
-  native/run-cyclone-tests.py --skip-diagnostics --stage-dir native/bootstrap/erasure-stage3
-  native/run-cyctest.py --stage-dir native/bootstrap/erasure-stage3
-  native/run-cyclone-tests.py --skip-diagnostics --cc clang \
-    --stage-dir native/bootstrap/erasure-stage3 --probe-dir native/cyclone-blockers \
-    --output native/bootstrap/erasure-stage3/clang-blockers \
-    --cflags '-O1 -g -fsanitize=address,undefined,function -fno-sanitize-recover=all'
-
-The two original blocker files generic-tuple.cyc and pointer-add.cyc now pass.
-They remain in the blocker directory alongside the new failing regressions to
-show progress and prevent the original bugs from returning. GCC-only success
-must not conceal Clang-detected callback UB.
-
-Allocator/GC checkpoint evidence (2026-11-14)
-  native/logs/gc-allocation-baseline.log -- reproduced ASan heap overflow
-  native/logs/gc-allocation{,-asan,-clang}.log -- fixed boundaries PASS
-  native/logs/allocator-banshee-regression.log -- 7 Banshee + 8 region tests PASS
-  native/logs/allocator-asan-probes.log -- 12/12 native probes PASS
-  native/logs/sysgc-collection.log -- collection and interior root PASS
-  native/logs/gc-stage2-{probes,cyctest}.log -- native/upstream suites PASS
-  native/logs/gc-fresh-convergence.json -- 81/81 identical
-  native/logs/runtime-backend-selection.log -- incompatible backends rejected
-  native/logs/gc-clang-smoke.log -- exact compiler callback sanitizer failure
-
-Select a runtime explicitly in a fresh build directory:
-  make -f native/Makefile BUILD=native/sysgc NATIVE_GC=system -j12 cyclone
-  native/bootstrap-stage1.py --build native/sysgc --compiler native/sysgc/cyclone64 \
-    --out native/bootstrap/gc-fresh1
-  make -f native/Makefile BUILD=native/sysgc native/sysgc/check-gc-collection
-The backend manifest records BDW-GC version/cflags/ldflags. Bootstrap and test
-scripts read it when linking. Changing a backend in place is rejected. Use new
-BUILD directories when changing instrumentation flags as well. CC and ARCH
-remain explicit overrides; BACKTRACE_CPPFLAGS can override the platform header
-path used for Clang's runtime_stacktrace.c compilation.
-
-Named-callback checkpoint evidence (2026-11-14)
-  native/bootstrap/callback-stage{1,2,3}/cyclone64 -- normal source stages
-  native/bootstrap/callback-clang4/cyclone64 -- full undefined/function checks
-  native/logs/callback-stage2-cyctest.log -- upstream PASS
-  native/logs/callback-convergence.json -- 81/81 identical
-  native/logs/callback-full-clang-probes.log -- 13/13 PASS
-  native/logs/callback-asan-probes.log -- 13/13 PASS
-  native/logs/callback-stage1-blockers.log -- dynamic callback and pointer FAIL
-  native/logs/callback-clang4-smoke.log -- first compiler failure is dynamic DC
-  native/logs/gc-allocation-clang.log -- exact-signature region cleanup PASS
-The desktop coredump count remains 30; last event is the old Nov13 17:31:39
-intentional region abort. No new desktop crash report was generated here.
+Desktop coredump count remains 30 (old last event Nov13 17:31:39); no new desktop
+crash reports were created. Expected-abort Banshee tests use child-only exit
+handling, and initial compiler runs use GDB containment. No global crash settings
+were changed. Checkpoints are not completion; the generic-reference work remains.

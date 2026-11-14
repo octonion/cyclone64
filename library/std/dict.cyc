@@ -426,7 +426,7 @@ static dict_t<`a,`b,`r2> @`r3 union_f($(`b(@f)(`c,`a,`b,`b),`c) @env, `a a, `b b
 
 dict_t<`a,`b,`r1> union_two_c(`b(@f)(`c,`a,`b,`b), `c env, dict_t<`a,`b,`r1> d1,
                               dict_t<`a,`b,`r1> d2) {
-  if ((int)d1.t == (int)d2.t)
+  if (d1.t == d2.t)
     return d1;
   if (d1.t == NULL)
     return d2;
@@ -442,7 +442,7 @@ dict_t<`a,`b,`r> intersect_c(`b(@f)(`c,`a,`b,`b), `c env, dict_t<`a,`b,`r> d1,
   let t2 = d2.t;
   if (t2 == NULL)
     return d2;
-  if ((int)d1.t == (int)t2)
+  if (d1.t == t2)
     return d2;
   tree ans_tree = NULL;
   region temp;

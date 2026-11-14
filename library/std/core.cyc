@@ -52,12 +52,12 @@ mstring_t<`r,`q> rqnew_string(region_t<`r> r, aqual_t<`q\T> q, unsigned int i)
 bool true_f(`a x) { return true; }
 bool false_f(`a x) { return false; }
 
-int intcmp(int a, int b) { return a - b; }
+int intcmp(int a, int b) { return a < b ? -1 : a > b ? 1 : 0; }
 int charcmp(char a, char b) { return (int)a - (int)b; }
 int nptrcmp(`a::A\T * `r a, `a * `r b) {
   if (a == b)
     return 0;
-  if (a > b)
+  if ((unsigned long)a > (unsigned long)b)
     return 1;
   return -1;
 }

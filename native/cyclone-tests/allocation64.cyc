@@ -1,0 +1,19 @@
+#include "cyclone/library/std/core.h"
+using Core;
+extern "C" unsigned long abi_large_index(void);
+int main(int argc, string_t ?argv) {
+  unsigned long count=abi_large_index()+15UL;
+  try { char ?p=malloc(count); return 1; } catch { case &Bad_alloc: break; default: return 99; }
+  try { int ?p=calloc(count,sizeof(int)); return 2; } catch { case &Bad_alloc: break; default: return 99; }
+  region r;
+  try { char ?p=rmalloc(r,count); return 3; } catch { case &Bad_alloc: break; default: return 99; }
+  try { int ?p=rcalloc(r,count,sizeof(int)); return 4; } catch { case &Bad_alloc: break; default: return 99; }
+  __uint128_t wide=((__uint128_t)1 << 100)+16;
+  try { int ?p=calloc(wide,sizeof(int)); return 5; } catch { case &Bad_alloc: break; default: return 99; }
+  long negative=-1L;
+  try { int ?p=calloc(negative,sizeof(int)); return 6; } catch { case &Bad_alloc: break; default: return 99; }
+  unsigned long small=3;
+  int ?p=rcalloc(r,small++,sizeof(int));
+  if (small!=4 || numelts(p)!=3 || p[2]!=0) return 7;
+  return 0;
+}

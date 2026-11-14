@@ -320,9 +320,9 @@ static assn_map_t vcgen_local_decl(env_t, decl_t, assn_map_t);
 // post-condition assns
 static struct Hashtable::Table<assn_t, assn_t> *vcgen_debug_assn_set = NULL;
 
-static int assn_easy_cmp(assn_t a1, assn_t a2) { return (int)a1 - (int)a2; }
+static int assn_easy_cmp(assn_t a1, assn_t a2) { return Absyn::cmp_ptr(a1, a2); }
 static int assn_easy_hash(assn_t a) { return (int)a; }
-static int term_easy_cmp(term_t t1, term_t t2) { return (int)t1 - (int)t2; }
+static int term_easy_cmp(term_t t1, term_t t2) { return Absyn::cmp_ptr(t1, t2); }
 static int term_easy_hash(term_t t) { return (int)t; }
 
 static Hashtable::table_t<assn_t, assn_t> get_vcgen_debug_assn_set() {

@@ -59,7 +59,7 @@ static int mystrcmp(string_t s1, string_t s2) {
 // return a negative, zero, or positive int according to whether the
 // first string list is less than, equal to, or greater than the second
 static int strlist_cmp(list_t<stringptr_t> ss1, list_t<stringptr_t> ss2) {
-  if ((int)ss1 == (int)ss2)
+  if ((unsigned long)ss1 == (unsigned long)ss2)
     return 0;
 
   for (; ss1 != NULL && ss2 != NULL; ss1 = ss1->tl, ss2 = ss2->tl) {
@@ -77,7 +77,7 @@ static int strlist_cmp(list_t<stringptr_t> ss1, list_t<stringptr_t> ss2) {
 }
 
 int varlist_cmp(list_t<var_t> vs1, list_t<var_t> vs2) {
-  if ((int)vs1 == (int)vs2)
+  if ((unsigned long)vs1 == (unsigned long)vs2)
     return 0;
   return strlist_cmp(vs1, vs2);
 }
@@ -1868,7 +1868,12 @@ static void i_visit_type(bool(@f)(`a, type_t),
   }
 }
 
-int cmp_ptr(`a a, `a b) { return (unsigned int)a - (unsigned int)b; }
+int cmp_ptr(`a a, `b b) {
+  // Pointer identity and ordering need every address bit. Subtraction can
+  // both wrap and overflow after narrowing to the comparator's int result.
+  unsigned long x = (unsigned long)a, y = (unsigned long)b;
+  return x < y ? -1 : x > y ? 1 : 0;
+}
 
 int hash_ptr(`a a) { return (unsigned int)a; }
 

@@ -663,6 +663,11 @@ static void dumpntyp(type_t t) {
               dump("__int64");
               return;
           }
+        case &IntCon(Unsigned, Int128_sz):
+          dump("unsigned __int128"); return;
+        case &IntCon(None, Int128_sz):
+        case &IntCon(Signed, Int128_sz):
+          dump("__int128"); return;
         case &FloatCon(i):
           switch (i) {
             case 0:

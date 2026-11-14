@@ -77,7 +77,8 @@ int cmp(Object_t x, Object_t y) {
   if ((void *)xself == (void *)yself)
     return 0;
   /* different classes -- return diff */
-  int diff = (int)xself->vtable - (int)yself->vtable;
+  unsigned long xt = (unsigned long)xself->vtable, yt = (unsigned long)yself->vtable;
+  int diff = xt < yt ? -1 : xt > yt ? 1 : 0;
   if (diff != 0)
     return diff;
   /* same class -downcast y to x's class and invoke cmp method */

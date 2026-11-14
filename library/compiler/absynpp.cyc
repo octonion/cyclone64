@@ -1178,6 +1178,8 @@ doc_t ntyp2doc(type_t t) {
         case Long_sz:
           ts = "long";
           break;
+        case Int128_sz:
+          return text(sn == Unsigned ? "__uint128_t" : "__int128_t");
         case LongLong_sz:
         default:
           switch (Flags::c_compiler) {

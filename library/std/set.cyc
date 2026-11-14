@@ -347,7 +347,7 @@ set_t<`a> diff(set_t<`a,`H> s1, set_t<`a,`H> s2) {
 }
 
 int setcmp(set_t<`a> s1, set_t<`a> s2) {
-  if ((unsigned)s1 == (unsigned)s2)
+  if ((unsigned long)s1 == (unsigned long)s2)
     return 0;
   if (s1->cardinality != s2->cardinality)
     return s1->cardinality - s2->cardinality;

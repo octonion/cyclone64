@@ -48,7 +48,15 @@ int main(void) {
   REJECT(_check_times(-1L,1));
   REJECT(_check_times(1,-1L));
   REJECT(_check_times(((unsigned __int128)1<<100),1));
+  REJECT(_check_alloc_plus(SIZE_MAX,1));
+  REJECT(_check_alloc_plus(-1L,1));
+  REJECT(_check_alloc_plus(((unsigned __int128)1<<100),1));
+  assert(_check_alloc_plus(MAX_MALLOC_SIZE-1,1)==MAX_MALLOC_SIZE);
+  REJECT(_check_alloc_size(-1L));
+  REJECT(_check_alloc_size(((unsigned __int128)1<<100)+16));
+  assert(_check_alloc_size(SIZE_MAX)==SIZE_MAX);
   unsigned count=2; assert(_check_times(count++,5)==10 && count==3);
+  assert(_check_alloc_size(count++)==3 && count==4);
   assert(_check_times(MAX_MALLOC_SIZE,1)==MAX_MALLOC_SIZE);
   for (unsigned aq=0;aq<3;++aq) {
     REJECT(_aqual_malloc(aq,SIZE_MAX));

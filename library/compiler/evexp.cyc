@@ -680,7 +680,7 @@ static int cmp_binding(binding_t b1, binding_t b2) {
     case $(_, NULL):
       return 1;
     default:
-      return (int)vdopt1 - (int)vdopt2;
+      return Absyn::cmp_ptr(vdopt1, vdopt2);
   }
 }
 
@@ -733,7 +733,7 @@ int exp_cmp(exp_t e1, exp_t e2) {
 
     case $(&Comprehension_e(vd1, e11, e12, _), &Comprehension_e(vd2, e21, e22, _)):
       if (vd1 != vd2)
-        return (int)vd1 - (int)vd2;
+        return Absyn::cmp_ptr(vd1, vd2);
       fallthru(e11, e12, e21, e22);
     case $(&And_e(e11, e12), &And_e(e21, e22)):
       fallthru(e11, e12, e21, e22);
@@ -854,7 +854,7 @@ int exp_cmp(exp_t e1, exp_t e2) {
       return list_cmp(designator_exp_cmp, des1, des2);
 
     case $(&Aggregate_e(_, ts1, des1, ad1), &Aggregate_e(_, ts2, des2, ad2)):
-      let c1 = (int)ad1 - (int)ad2;
+      let c1 = Absyn::cmp_ptr(ad1, ad2);
       if (c1 != 0)
         return c1;
       c1 = list_cmp(unify_and_cmp, ts1, ts2);
@@ -863,10 +863,10 @@ int exp_cmp(exp_t e1, exp_t e2) {
       return list_cmp(designator_exp_cmp, des1, des1);
 
     case $(&Datatype_e(es1, dd1, df1), &Datatype_e(es2, dd2, df2)):
-      let c1 = (int)dd1 - (int)dd2;
+      let c1 = Absyn::cmp_ptr(dd1, dd2);
       if (c1 != 0)
         return c1;
-      c1 = (int)df1 - (int)df2;
+      c1 = Absyn::cmp_ptr(df1, df2);
       if (c1 != 0)
         return c1;
       return list_cmp(exp_cmp, es1, es2);
@@ -874,7 +874,7 @@ int exp_cmp(exp_t e1, exp_t e2) {
     // FIX:  need to add these two cases in.
     case $(&Enum_e(_, _), &Enum_e(_, _)):
     case $(&AnonEnum_e(_, _), &AnonEnum_e(_, _)):
-      return (int)e1 - (int)e2;
+      return Absyn::cmp_ptr(e1, e2);
 
     default:
       Warn::impos2("Evexp::exp_cmp, unexpected case $([", e1case, "]", e1, ",[", e2case, "]", e2,

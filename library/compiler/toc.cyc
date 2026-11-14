@@ -228,6 +228,8 @@ MAKE_VAR(_aqual_malloc);
 MAKE_VAR(_aqual_calloc);
 MAKE_VAR(_fast_region_malloc);
 MAKE_VAR(_check_times);
+MAKE_VAR(_check_alloc_size);
+MAKE_VAR(_check_alloc_plus);
 MAKE_VAR(_new_region);
 MAKE_VAR(_push_region);
 MAKE_VAR(_pop_region);
@@ -1544,7 +1546,8 @@ static exp_opt_t array_length_exp(exp_t e) {
       fallthru(bd, zt);
     case &ComprehensionNoinit_e(bd, _, zt):
       bd = deep_copy(bd);
-      return zt ? set_type(add_exp(bd, set_type(uint_exp(1, DL), uint_type), DL), uint_type) : bd;
+      return zt ? set_type(fncall_exp_dl(_check_alloc_plus_e, bd,
+                          set_type(uint_exp(1, DL), uint_type)), uint_type) : bd;
     default:
       return NULL;
   }
@@ -2836,10 +2839,11 @@ void exp_to_c(env_t nv, exp_t e) {
         // the bounds expression here (which could have effects.)  So we
         // change the bounds expression on the comprehension to be lenvar.
         switch (e1->r) {
-          case &Comprehension_e(_, *bd, _, _):
-            fallthru(bd);
-          case &ComprehensionNoinit_e(*bd, _, _):
-            *bd = deep_copy(lenexp);
+          case &Comprehension_e(_, *bd, _, zt):
+            fallthru(bd, zt);
+          case &ComprehensionNoinit_e(*bd, _, zt):
+            *bd = zt ? set_type(prim2_exp(Minus, deep_copy(lenexp),
+                         set_type(uint_exp(1, DL), uint_type), DL), uint_type) : deep_copy(lenexp);
             break;
           default:
             break;
@@ -2876,7 +2880,9 @@ void exp_to_c(env_t nv, exp_t e) {
       if (vse != NULL)  // in case of the struct hack, types do not line up
         e->r = cast_it_r(typ_to_c(nv->ctxt, old_typ), deep_copy(e));
       if (array_len) {
-        let s = declare_stmt((qvar_t)lenvar, uint_type, (exp_t)array_len,
+        let s = declare_stmt((qvar_t)lenvar, uint_type,
+                             set_type(fncall_exp_dl(_check_times_e, (exp_t)array_len,
+                                      set_type(uint_exp(1, DL), uint_type)), uint_type),
                              exp_stmt(deep_copy(e), DL), DL);
         e->r  = stmt_exp_r(s);
       }
@@ -3249,10 +3255,11 @@ void exp_to_c(env_t nv, exp_t e) {
       exp_to_c(nv, num_elts);
       qvar_opt_t x = NULL;
       exp_t pexp;
-      exp_t num_elts2 = num_elts;
+      let checked_count = set_type(fncall_exp_dl(_check_alloc_size_e, num_elts), ulong_type);
+      exp_t num_elts2 = checked_count;
       if (is_fat) {  // necessary to avoid evaluating num_elts twice!
         x         = temp_var(nv->ctxt);
-        num_elts2 = var_exp(x, DL);
+        num_elts2 = set_type(var_exp(x, DL), ulong_type);
       }
       if (mknd == Calloc) {  // ignores aqopt for now ... revisit
         if ((rgnopt == NULL && aqopt == NULL) || Flags::no_regions) {
@@ -3291,7 +3298,7 @@ void exp_to_c(env_t nv, exp_t e) {
             (mknd == Calloc ? sizeoftype_exp(t_c, DL) : set_type(uint_exp(1, DL), uint_type));
         exp_t rexp = fncall_exp_dl(_tag_fat_e, pexp, elt_sz, num_elts2);
         rexp->topt = fat_ptr_type(nv->ctxt);
-        stmt_t s   = declare_stmt((qvar_t)x, uint_type, num_elts, exp_stmt(rexp, DL), DL);
+        stmt_t s   = declare_stmt((qvar_t)x, ulong_type, checked_count, exp_stmt(rexp, DL), DL);
         e->r       = stmt_exp_r(s);
       } else
         e->r = cast_it_r(typ_to_c(nv->ctxt, old_typ), pexp);
@@ -5224,6 +5231,8 @@ toc_context_t Toc_Ctx_create() {
   _aqual_calloc_pr.f0.C_n                     = NULL;
   _fast_region_malloc_pr.f0.C_n               = NULL;
   _check_times_pr.f0.C_n                      = NULL;
+  _check_alloc_size_pr.f0.C_n = NULL;
+  _check_alloc_plus_pr.f0.C_n = NULL;
   _new_region_pr.f0.C_n                       = NULL;
   _push_region_pr.f0.C_n                      = NULL;
   _pop_region_pr.f0.C_n                       = NULL;
@@ -5232,7 +5241,7 @@ toc_context_t Toc_Ctx_create() {
   _rethrow_pr.f0.C_n                          = NULL;
   _throw_assert_pr.f0.C_n                     = NULL;
 
-  ctxt->globals = new {&_cyc_callback_equal_str, &_cyc_callback_register_static_str, &_cyc_callback_adapt_str, &_throw_str,
+  ctxt->globals = new {&_check_alloc_plus_str, &_check_alloc_size_str, &_cyc_callback_equal_str, &_cyc_callback_register_static_str, &_cyc_callback_adapt_str, &_throw_str,
                  &setjmp_str,
                  &_push_handler_str,
                  &_pop_handler_str,

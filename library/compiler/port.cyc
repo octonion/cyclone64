@@ -87,9 +87,9 @@ typedef struct Edit {
 } @edit_t;
 typedef list_t<edit_t> edits_t;
 // Used for sorting edits
-int cmp_edit(edit_t e1, edit_t e2) { return (int)e1 - (int)e2; }
+int cmp_edit(edit_t e1, edit_t e2) { return Absyn::cmp_ptr(e1, e2); }
 static seg_t get_seg(edit_t e) { return e->loc; }
-int cmp_seg_t(seg_t loc1, seg_t loc2) { return (int)(loc1 - loc2); }
+int cmp_seg_t(seg_t loc1, seg_t loc2) { return loc1 < loc2 ? -1 : loc1 > loc2 ? 1 : 0; }
 int hash_seg_t(seg_t loc) { return (int)loc; }
 typedef struct VarUsage {
   bool address_taken;

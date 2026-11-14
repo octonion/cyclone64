@@ -121,11 +121,13 @@ static void out_of_memory(void) {
   _throw_badalloc();
 }
 
+// Allocate exactly the advertised payload: an undocumented spare byte hides
+// one-byte overwrites from malloc-backed sanitizer builds.
 void *GC_malloc(size_t x) {
   // FIX:  I'm calling calloc to ensure the memory is zero'd.  This
   // is because I had to define GC_calloc in runtime_memory.c
-  if (x > SIZE_MAX - sizeof(GC_head) - 1) out_of_memory();
-  GC_head *p = calloc(1, sizeof *p + x + 1);
+  if (x > SIZE_MAX - sizeof(GC_head)) out_of_memory();
+  GC_head *p = calloc(1, sizeof *p + x);
 
   if (!p)
     out_of_memory();
@@ -139,8 +141,8 @@ void *GC_malloc(size_t x) {
 void *GC_malloc_atomic(size_t x) {
   // FIX:  I'm calling calloc to ensure the memory is zero'd.  This
   // is because I had to define GC_calloc in runtime_memory.c
-  if (x > SIZE_MAX - sizeof(GC_head) - 1) out_of_memory();
-  GC_head *p = calloc(1, sizeof *p + x + 1);
+  if (x > SIZE_MAX - sizeof(GC_head)) out_of_memory();
+  GC_head *p = calloc(1, sizeof *p + x);
 
   if (!p)
     out_of_memory();
@@ -153,16 +155,16 @@ void *GC_malloc_atomic(size_t x) {
 
 void *GC_realloc(void *x, size_t n) {
   if (!x) return GC_malloc(n);
-  if (n > SIZE_MAX - sizeof(GC_head) - 1) out_of_memory();
+  if (n > SIZE_MAX - sizeof(GC_head)) out_of_memory();
   size_t sz = GC_size(x);
   GC_head *p = x;
 
   p--;
 
 #if (defined(__linux__) && defined(__KERNEL__))
-  p = realloc(p, sizeof *p + sz + 1, sizeof *p + n + 1);
+  p = realloc(p, sizeof *p + sz, sizeof *p + n);
 #else
-  p = realloc(p, sizeof *p + n + 1);
+  p = realloc(p, sizeof *p + n);
 #endif
   if (!p)
     out_of_memory();

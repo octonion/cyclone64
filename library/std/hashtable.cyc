@@ -96,7 +96,7 @@ void insert(table_t<`a,`b> t, `a key, `b val) {
   let tab = t->tab;
   let p   = tab[(t->hash)(key) % numelts(tab)].cells;
   for (; p != NULL; p = p->next) {
-    if ((int)p->key == (int)key)
+    if ((unsigned long)p->key == (unsigned long)key)
       return &p->value;
   }
   return NULL;

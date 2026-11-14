@@ -1809,7 +1809,7 @@ int typecmp(type_t t1, type_t t2) {
         return c;
       return list_cmp(typecmp, ts1, ts2);
     case $(&Evar(...), &Evar(...)):
-      return ((int)t1) - ((int)t2);
+      return Absyn::cmp_ptr(t1, t2);
       // Warn::impos2("typecmp: can only compare closed types");
 
     case $(&VarType(tv2), &VarType(tv1)):
@@ -2105,7 +2105,8 @@ bool coerce_to_bool(exp_t e) {
   if (!coerce_sint_type(e))
     switch (compress((type_t)e->topt)) {
       case &PointerType(_):
-        unchecked_cast(e, uint_type, Other_coercion);
+        // A non-null LP64 pointer may have an all-zero low word.
+        unchecked_cast(e, ulong_type, Other_coercion);
         break;
       default:
         return false;

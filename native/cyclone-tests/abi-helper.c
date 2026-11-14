@@ -11,3 +11,5 @@ int abi_literal_values(unsigned long a, unsigned long b, long c, long d,
   return a == ULONG_MAX && b == ULONG_MAX && c == LONG_MAX && d == LONG_MIN &&
          e == ULLONG_MAX && f == LLONG_MIN;
 }
+
+void *abi_pointer_at(unsigned long address) { return (void *)address; }

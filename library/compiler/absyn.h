@@ -59,6 +59,8 @@ namespace BansheeIf {
 }  // namespace BansheeIf
 
 namespace Absyn {
+  int cmp_ptr(`a, `b); // Full-width boxed identity ordering; never subtract addresses.
+
   using Core;
   using List;
 

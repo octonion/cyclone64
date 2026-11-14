@@ -360,6 +360,20 @@ void *_bounded_GC_calloc_atomic(size_t, size_t, const char *, int);
 #define _cyccalloc_atomic(n, s) _bounded_GC_calloc_atomic(n, s, __FILE__, __LINE__)
 #endif
 
+/* Validate before a C size_t parameter can narrow a wide source expression. */
+#define _check_alloc_size(x) \
+  ({ __auto_type _ca_x = (x); \
+     if (_ca_x < 0 || _ca_x > SIZE_MAX) _throw_badalloc(); \
+     (size_t)_ca_x; })
+
+/* Bounds for initialized arrays include a possible terminator. Check the
+ * addition before evaluating it in the source integer type. */
+#define _check_alloc_plus(x, y) \
+  ({ __auto_type _cap_x = (x); __auto_type _cap_y = (y); \
+     if (_cap_x < 0 || _cap_y < 0 || _cap_y > MAX_MALLOC_SIZE || \
+         _cap_x > MAX_MALLOC_SIZE - _cap_y) _throw_badalloc(); \
+     (unsigned int)(_cap_x + _cap_y); })
+
 /* Preserve original operand widths until the bounded product is validated. */
 #define _check_times(x, y) \
   ({ __auto_type _ct_x = (x); __auto_type _ct_y = (y); \

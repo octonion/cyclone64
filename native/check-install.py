@@ -57,4 +57,17 @@ with tempfile.TemporaryDirectory(prefix='cyclone64-installed-') as tmp:
     flags=shlex.split(run(['pkg-config','--cflags','--libs','banshee64'],'pkgconfig-banshee',tmp))
     run([*cc,*cflags,'solver.c',*flags,*ldflags,'-o','solver'],'solver-compile',tmp)
     run([tmp/'solver'],'solver-run',tmp)
+    # Synthetic CPP markers exercise short spaced paths as well as names
+    # beyond the old 100-byte lexer buffer, independently of checkout length.
+    for label, filename in [('spaces', '/short path/source.cyc'),
+                            ('long', '/long/' + 'segment/' * 30 + 'source.cyc'),
+                            ('escaped', '/quoted "name"/back\\slash.cyc')]:
+        encoded = json.dumps(filename)
+        source = tmp / ('marker-' + label + '.cyp')
+        generated = source.with_suffix('.c')
+        source.write_text('# 41 ' + encoded + '\nint marker(void) { return 7; }\n')
+        run([driver, source, '--emit-c', '-o', generated], 'marker-' + label, tmp)
+        assert encoded in generated.read_text(), 'lost filename in generated C: ' + label
+        run([driver, generated, '-c', '-o', source.with_suffix('.o')],
+            'marker-' + label + '-compile', tmp)
 print('Installed toolchain checks passed.',flush=True)

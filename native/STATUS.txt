@@ -20,6 +20,13 @@ Banshee sanitizer evidence; it does not imply all untested callbacks are audited
 Fresh GCC 15 and Clang 21 -O2 -g -march=x86-64 bootstraps and make check pass
 with these changes, each with 81/81 generated-C convergence. Build roots are
 build/github-gcc and build/github-clang; logs are native/logs/github-*.log.
+The hosted relocation check also exposed a lexer line-marker bug: a fixed
+100-byte %s filename scan truncated at spaces and silently lost long names.
+The local long-prefix checks had not detected this because ignored names left
+syntactically valid but incorrect source locations. Quoted filename parsing now
+preserves the full spelling, including escaped quotes/backslashes. Installed
+checks explicitly assert filename preservation for short spaced and long paths
+and compile the resulting C, independent of the checkout path length.
 The older paths and assessments below are historical workstation records.
 
 UNIFIED MAKE BUILD / INSTALLATION

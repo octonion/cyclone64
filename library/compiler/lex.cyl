@@ -821,24 +821,35 @@ static void inc_linenumber() {
 
 static void process_directive(char ?line) {
   int i;
-  char buf[100];
   const char ?filename = "";
-
-  if (sscanf(line, "# %d \"%s", &i, buf) == 2) {
-    filename = aprintf("\"%s", buf);
-    if (linenumber == i && pos_info != NULL && strcmp(pos_info->filename, filename) == 0)
-      return;
-    linenumber = i;
-  } else if (sscanf(line, "# %d", &i) == 1) {
-    if (linenumber == i)
-      return;
-    linenumber = i;
-    if (pos_info != NULL)
-      filename = pos_info->filename;
-  } else {
+  if (sscanf(line, "# %d", &i) != 1) {
     linenumber++;  // we don't understand it, so skip over it
     return;
   }
+  if (pos_info != NULL)
+    filename = pos_info->filename;
+
+  // Keep the complete quoted spelling for generated C line markers. A %s
+  // conversion truncates spaces, and a fixed buffer loses long filenames.
+  // Escaped quotes and backslashes must remain escaped, not end the name.
+  size_t length = strlen(line);
+  size_t start = 0;
+  while (start < length && line[start] != '"')
+    start++;
+  if (start < length) {
+    size_t end = start + 1;
+    while (end < length && line[end] != '"') {
+      if (line[end] == '\\' && end + 1 < length)
+        end += 2;
+      else
+        end++;
+    }
+    if (end < length)
+      filename = substring(line + start, 0, end - start + 1);
+  }
+  if (linenumber == i && pos_info != NULL && strcmp(pos_info->filename, filename) == 0)
+    return;
+  linenumber = i;
   pos_info = rnew_filepos(heap_region, filename, linenumber, pos_info);
 }
 

@@ -1,0 +1,34 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `a read_matrix(`a::B p[2][2],unsigned i,unsigned j) { return p[i][j]; }
+static void write_matrix(`a::B p[2][2],unsigned i,unsigned j,`a value) { p[i][j]=value; }
+static `a read_row_address(`a::B p[2][2],unsigned j) {
+  let row=&p[1];
+  return (*row)[j];
+}
+static int allocated_matrix(region_t<`r> r,`a::B x,`a y) {
+  let a=rnew(r) {{x,y},{y,x}};
+  if(read_matrix(a,1,0)!=y || read_row_address(a,1)!=x) return 1;
+  write_matrix(a,1,1,y);
+  return (*a)[0]==x && a[1][1]==y ? 0 : 2;
+}
+static int local_matrix(`a::B x,`a y) {
+  `a a[2][2]={{x,y},{y,x}};
+  if(sizeof(a)!=4*sizeof(`a)) return 1;
+  if(read_matrix(a,0,1)!=y || read_matrix(a,1,0)!=y) return 2;
+  write_matrix(a,1,1,y);
+  return a[0][0]==x && a[1][1]==y ? 0 : 3;
+}
+int main(int argc,string_t ?argv) {
+  int a[2][2]={{10,20},{30,40}};
+  if(read_matrix(a,1,0)!=30) return 1;
+  write_matrix(a,0,1,-7);
+  if(a[0][0]!=10 || a[0][1]!=-7 || a[1][0]!=30 || a[1][1]!=40) return 2;
+  if(read_row_address(a,0)!=30 || read_row_address(a,1)!=40) return 3;
+  if(local_matrix(11,-29)) return 4;
+  if(local_matrix(0x1234567800000011L,0x4321876500000029L)) return 5;
+  region r;
+  if(allocated_matrix(r,11,-29)) return 6;
+  if(allocated_matrix(r,0x1234567800000011L,0x4321876500000029L)) return 7;
+  return 0;
+}

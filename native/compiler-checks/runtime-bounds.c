@@ -5,9 +5,18 @@
 static jmp_buf rejected;
 static int expected;
 void *_throw_arraybounds_fn(const char *f,unsigned l) { assert(expected); longjmp(rejected,1); }
+void *_throw_badalloc_fn(const char *f,unsigned l) { assert(expected); longjmp(rejected,1); }
 void *_throw_null_fn(const char *f,unsigned l) { assert(expected); longjmp(rejected,1); }
 #define REJECT(expr) do { expected=1; if(!setjmp(rejected)) { (void)(expr); assert(!"missing bounds exception"); } expected=0; } while(0)
 int main(void) {
+  unsigned long width=4,count=3;
+  assert(_cyc_layout_array_size(width++,count++)==12 && width==5 && count==4);
+  assert(_cyc_layout_array_size(4,0)==0);
+  assert(_cyc_layout_array_size(8,0x100000001UL)==0x800000008UL);
+  REJECT(_cyc_layout_array_size(8,SIZE_MAX));
+  REJECT(_cyc_layout_array_size(4,-1));
+  REJECT(_cyc_layout_array_size(4,(unsigned __int128)1<<100));
+  REJECT(_cyc_layout_array_size(0,1));
   int a[]={10,20,30};
   struct _fat_ptr p={(void *)a,(void *)a,(void *)(a+3)};
   assert(*(int *)_check_fat_subscript(p,sizeof(int),2UL)==30);

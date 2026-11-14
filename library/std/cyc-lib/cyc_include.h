@@ -457,6 +457,14 @@ void _profile_free_region(struct _RegionHandle *, const char *, const char *, in
 #define _cyccalloc_atomic(n, s) _profile_GC_calloc_atomic(n, s, __FILE__, __FUNCTION__, __LINE__)
 #endif  // CYC_REGION_PROFILE
 
+/* Nested generic arrays use the product of their logical element widths,
+   preserving size_t range independently of the runtime allocation limit. */
+#define _cyc_layout_array_size(element, count) \
+  ({ size_t _cla_element = _check_alloc_size(element); \
+     size_t _cla_count = _check_alloc_size(count); \
+     if (!_cla_element || _cla_count > SIZE_MAX / _cla_element) _throw_badalloc(); \
+     _cla_element * _cla_count; })
+
 /* Experimental boxed-reference layout ABI. Never read/write a whole word
    when the caller supplied a four-byte C object. memcpy also permits unaligned
    addresses and avoids effective-type aliasing violations. */

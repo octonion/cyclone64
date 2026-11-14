@@ -208,6 +208,7 @@ MAKE_VAR(_fat_ptr_minus);
 MAKE_VAR(_fat_ptr_diff);
 MAKE_VAR(_cyc_callback_bind);
 MAKE_VAR(_cyc_callback_register_bound_static);
+MAKE_VAR(_cyc_layout_array_size);
 MAKE_VAR(_cyc_layout_load);
 MAKE_VAR(_cyc_layout_store);
 MAKE_VAR(_cyc_callback_adapt);
@@ -751,6 +752,14 @@ static bool native_layout_type(type_t t) {
     default: return false;
   }
 }
+static bool native_layout_dependent(type_t t) {
+  if (native_layout_type(t)) return true;
+  if (!Flags::native_layouts) return false;
+  switch (compress(t)) {
+    case &ArrayType(ai): return native_layout_dependent(ai.elt_type);
+    default: return false;
+  }
+}
 static var_t native_layout_name(int i) {
   return new (string_t) aprintf("_cyc_layout_%d", i);
 }
@@ -777,9 +786,9 @@ static exp_t native_layout_size(toc_context_t ctxt, type_t t) {
   }
   if (Flags::native_layouts) switch (compress(t)) {
     case &ArrayType(ai):
-      if (native_layout_type(ai.elt_type) && ai.num_elts != NULL)
-        return set_type(times_exp(native_layout_size(ctxt, ai.elt_type),
-                                  deep_copy((exp_t)ai.num_elts), DL), ulong_type);
+      if (native_layout_dependent(ai.elt_type) && ai.num_elts != NULL)
+        return set_type(fncall_exp_dl(_cyc_layout_array_size_e, native_layout_size(ctxt, ai.elt_type),
+                                     deep_copy((exp_t)ai.num_elts)), ulong_type);
       break;
     default: break;
   }
@@ -1518,18 +1527,20 @@ static enum PTR_ANS ptr_use_to_c(env_t nv, exp_t ptr, absyn_annot_t annot, exp_o
     exp_to_c(nv, index);
   switch (old_typ) {
     case &PointerType(PtrInfo{ta, tq, PtrAtts(_, _, b, zt, ...)}):
-      if (native_layout_type(ta)) {
+      if (native_layout_dependent(ta)) {
         let bd = get_bounds_exp_constrain(bounds_one(), b, true);
         let width = native_layout_size(nv->ctxt, ta);
         let ind = index ? index : set_type(uint_exp(0, DL), uint_type);
         let call = bd == NULL
           ? fncall_exp_dl(_check_fat_subscript_e, deep_copy(ptr), width, ind)
           : fncall_exp_dl(_check_known_subscript_null_e, deep_copy(ptr), (exp_t)bd, width, ind);
-        ptr->r = cast_it_r(cstar_type(void_star_type(nv->ctxt), tq),
-                          set_type(call, cstar_type(uchar_type, mt_tq)));
-        ptr->topt = cstar_type(void_star_type(nv->ctxt), tq);
+        bool array = is_array_type(ta);
+        let result_type = array ? typ_to_c_array(nv->ctxt, ta)
+                                : cstar_type(void_star_type(nv->ctxt), tq);
+        ptr->r = cast_it_r(result_type, set_type(call, cstar_type(uchar_type, mt_tq)));
+        ptr->topt = result_type;
         set_lhs(nv, old_lhs);
-        return DIRECT_DEREF;
+        return array ? DROP_SUBSCRIPT : DIRECT_DEREF;
       }
       switch (annot) {
         case &InsertChecks::NoCheck:
@@ -1643,7 +1654,7 @@ static enum PTR_ANS ptr_use_to_c(env_t nv, exp_t ptr, absyn_annot_t annot, exp_o
 }
 
 static exp_opt_t native_reference_address(env_t nv, exp_t e) {
-  if (!native_layout_type((type_t)e->topt)) return NULL;
+  if (!native_layout_dependent((type_t)e->topt)) return NULL;
   switch (e->r) {
     case &Deref_e(p):
       ptr_use_to_c(nv, p, e->annot, NULL);
@@ -2966,7 +2977,7 @@ void exp_to_c(env_t nv, exp_t e) {
 
     case &New_e(rgnopt, e1, qual):  // ignore qual for now
       exp_opt_t native_width = NULL;
-      if (native_layout_type(pointer_elt_type(old_typ)))
+      if (native_layout_dependent(pointer_elt_type(old_typ)))
         native_width = native_layout_size(nv->ctxt, pointer_elt_type(old_typ));
       // we share the work with RemoveAggrs:
       // * we create the malloc-exp and if necessary, the tag_fat and cast
@@ -3109,9 +3120,10 @@ void exp_to_c(env_t nv, exp_t e) {
       break;
     case &Deref_e(e1):
       did_inserted_checks = true;
-      ptr_use_to_c(nv, e1, e->annot, NULL);
+      enum PTR_ANS res = ptr_use_to_c(nv, e1, e->annot, NULL);
       if (native_layout_type(old_typ))
         e->r = fncall_exp_dl(_cyc_layout_load_e, e1, native_layout_size(nv->ctxt, old_typ))->r;
+      else if (res == DROP_SUBSCRIPT) e->r = e1->r;
       break;
     case &Subscript_e(e1, e2):
       did_inserted_checks = true;
@@ -3124,6 +3136,13 @@ void exp_to_c(env_t nv, exp_t e) {
         e->r = e1->r;
       break;
     case &Array_e(dles0):
+      switch (compress(old_typ)) {
+        case &ArrayType(ai):
+          if (native_layout_dependent(ai.elt_type))
+            e->annot = new NativeArrayInit(native_layout_size(nv->ctxt, ai.elt_type));
+          break;
+        default: break;
+      }
       // We now leave this to RemoveAggrs, which converts this to assignments
       // (it can only occur as an initializer)
       // but toplevel arrays must be converted to unresolvedMem to appease
@@ -3134,6 +3153,8 @@ void exp_to_c(env_t nv, exp_t e) {
         e->r = unresolvedmem_exp_r(NULL, dles0);
       break;
     case &Comprehension_e(vd, e1, e2, iszeroterm):
+      if (native_layout_dependent((type_t)e2->topt))
+        e->annot = new NativeArrayInit(native_layout_size(nv->ctxt, (type_t)e2->topt));
       // at top-level e1 and e2 must be constant and we make an
       // unresolvedmem_exp. inside a function, we now pass the buck to
       // RemoveAggrs
@@ -5114,7 +5135,7 @@ static void local_decl_to_c(env_t nv, vardecl_t vd, stmt_t s) {
       exp_to_c(nv, init);
     switch (compress(old_typ)) {
       case &ArrayType(ai):
-        if (native_layout_type(ai.elt_type))
+        if (native_layout_dependent(ai.elt_type))
           init->annot = new NativeArrayInit(native_layout_size(nv->ctxt, ai.elt_type));
         break;
       default: break;
@@ -5443,6 +5464,7 @@ toc_context_t Toc_Ctx_create() {
   _fat_ptr_diff_pr.f0.C_n = NULL;
   _cyc_callback_bind_pr.f0.C_n = NULL;
   _cyc_callback_register_bound_static_pr.f0.C_n = NULL;
+  _cyc_layout_array_size_pr.f0.C_n = NULL;
   _cyc_layout_load_pr.f0.C_n = NULL;
   _cyc_layout_store_pr.f0.C_n = NULL;
   _cyc_callback_adapt_pr.f0.C_n = NULL;
@@ -5478,7 +5500,7 @@ toc_context_t Toc_Ctx_create() {
   _rethrow_pr.f0.C_n                          = NULL;
   _throw_assert_pr.f0.C_n                     = NULL;
 
-  ctxt->globals = new {&_cyc_callback_bind_str, &_cyc_callback_register_bound_static_str, &_cyc_layout_load_str, &_cyc_layout_store_str, &_check_alloc_plus_str, &_check_alloc_size_str, &_cyc_callback_equal_str, &_cyc_callback_register_static_str, &_cyc_callback_adapt_str, &_throw_str,
+  ctxt->globals = new {&_cyc_layout_array_size_str, &_cyc_callback_bind_str, &_cyc_callback_register_bound_static_str, &_cyc_layout_load_str, &_cyc_layout_store_str, &_check_alloc_plus_str, &_check_alloc_size_str, &_cyc_callback_equal_str, &_cyc_callback_register_static_str, &_cyc_callback_adapt_str, &_throw_str,
                  &setjmp_str,
                  &_push_handler_str,
                  &_pop_handler_str,

@@ -99,6 +99,10 @@ static bool can_use_initializer(exp_t e, type_t t) {
 static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
   enum ExpResult res = OtherRes;  // changed in several cases
   bool did_assign    = false;     // changed in comprehension, array and aggr cases
+  switch (e->annot) {
+    case &Toc::NativeArrayInit(width): env.native_width = width; break;
+    default: break;
+  }
 
   switch (e->r) {
     case &Const_e(Cnst{.String_c = s}):

@@ -429,15 +429,38 @@ static struct Absyn::Vardecl *bind2vardecl(Absyn::binding_t b) {
   }
 }
 
+// The current arithmetic solver models 32-bit words. Preserve effects, but
+// use opaque values for wider arithmetic instead of deriving false proofs.
+static bool wide_integer_type(type_opt_t tp) {
+  if (tp == NULL) return false;
+  switch (Absyn::compress((type_t)tp)) {
+    case &Absyn::AppType(&Absyn::IntCon(_, Absyn::Long_sz), _):
+    case &Absyn::AppType(&Absyn::IntCon(_, Absyn::LongLong_sz), _):
+    case &Absyn::AppType(&Absyn::IntCon(_, Absyn::Int128_sz), _): return true;
+    case &Absyn::SubsetType(vd, ...): return wide_integer_type(vd->type);
+    default: return false;
+  }
+}
+
+static bool opaque_primitive(Absyn::primop_t p, type_opt_t left, type_opt_t right) {
+  if (wide_integer_type(left) || wide_integer_type(right)) return true;
+  switch (p) {
+    case Absyn::Lt: case Absyn::Lte: case Absyn::Gt: case Absyn::Gte:
+    case Absyn::ULt: case Absyn::ULte: case Absyn::UGt: case Absyn::UGte:
+      return (left != NULL && Tcutil::is_pointer_type((type_t)left)) ||
+             (right != NULL && Tcutil::is_pointer_type((type_t)right));
+    default: return false;
+  }
+}
+
 // checking if an expression has type unsigned int
 static bool is_unsigned_int_exp(exp_t e) {
   type_opt_t t = e->topt;
   if (t == NULL)
     return false;
   switch (t) {
-      // wangyl:: FIX, dependence on sizeof(int) == sizeof(long) !!!!!
     case &Absyn::AppType(&Absyn::IntCon(Absyn::Unsigned, sz), _):
-      if ((sz == Absyn::Long_sz) || (sz == Absyn::Int_sz))
+      if (sz == Absyn::Int_sz)
         return true;
       else
         return false;
@@ -663,6 +686,17 @@ static $(term_t, term_t, assn_map_t)
     // checks that are generated based
     // on the value of the root and index
     let $(bnds_check, null_check) = okderef(t1, t2);
+    if (Tcutil::is_fat_pointer_type((type_t)root->topt) || wide_integer_type(index->topt)) {
+      // A successful fat subscript can start from a cursor before the base.
+      // It does not imply 0 <= index < numelts(cursor), or validate index 0.
+      // Keep this runtime result opaque rather than poisoning later proofs.
+      let valid = neq(fresh_var(NULL, Absyn::uint_type), zero());
+      update_try_assnmap(env, and_assnmap_assn(am2, not(valid)),
+                         fresh_var(NULL, Absyn::exn_type()));
+      insert_exp_checks(env->assn_info, root,
+          new ExpChecks{.ctxt = am2, .bounds_check = valid, .null_check = null_check});
+      return $(t1, t2, and_assnmap_assn(am2, and(valid, null_check)));
+    }
     // the following checks are real checks
     // that will be inserted by the compiler
     // if above checks couldn't be verified.
@@ -742,13 +776,15 @@ static $(term_t, assn_map_t) vcgen_binop(env_t env, type_opt_t tp_opt, Absyn::pr
         if (!env->pure_exp && Tcutil::is_zeroterm_pointer_type(tp) &&
             !Tcutil::is_fat_pointer_type(tp))
           update_try_assnmap(env, am, fresh_var(NULL, Absyn::exn_type()));
-        return $(offseti(t1, t2, tp), am);
+        return $(fresh_var(NULL, tp), am);
       case Absyn::Minus:
-        return $(offseti(t1, unop(Absyn::Minus, t2, Absyn::sint_type), tp), am);
+        return $(fresh_var(NULL, tp), am);
       default:
         Warn::impos("vcgen: result has pointer type but uses bad primop");
     }
   }
+  // Pointer offsets and wide integer arithmetic cannot wrap as 32-bit terms.
+  if (wide_integer_type(tp_opt)) return $(fresh_var(NULL, tp_opt), am);
   // not a pointer type
   let t = binop(p, t1, t2, tp);
   // if the expression has type unsigned, then we may
@@ -1075,11 +1111,16 @@ static $(term_t, assn_map_t) vcgen_rexp_inner(env_t env, exp_t e, assn_map_t ami
     case &Absyn::Primop_e(p, &List{e1, NULL}):
       // an expression with a unary operator
       let $(t, am) = vcgen_debug_rexp(env, e1, amin);
+      if (wide_integer_type(e1->topt) || wide_integer_type(e->topt))
+        return $(fresh_var(NULL, e->topt), am);
       return $(unop(p, t, e->topt), am);
     case &Absyn::Primop_e(p, &List{e1, &List { e2, _ }}):
       // an expression with a binary operator
       let $(t1, am1) = vcgen_debug_rexp(env, e1, amin);
       let $(t2, am2) = vcgen_debug_rexp(env, e2, am1);
+      if (opaque_primitive(p, e1->topt, e2->topt) &&
+          !Tcutil::is_pointer_type((type_t)e->topt))
+        return $(fresh_var(NULL, e->topt), am2);
       return vcgen_binop(env, e->topt, p, t1, t2, am2);
     case &Absyn::Primop_e(_, _):
       Warn::impos("vcgen: bad primop");
@@ -1283,10 +1324,8 @@ static $(term_t, assn_map_t) vcgen_rexp_inner(env_t env, exp_t e, assn_map_t ami
           // size is the same.
         case $(&Absyn::AppType(&Absyn::IntCon(u1, s1), _),
                &Absyn::AppType(&Absyn::IntCon(u2, s2), _)):
-          // wangyl: a hack to tell compiler that long and int have the same
-          // size FIX: this is machine dependent!
-          s1 = (s1 == Absyn::Long_sz ? Absyn::Int_sz : s1);
-          s2 = (s2 == Absyn::Long_sz ? Absyn::Int_sz : s2);
+          if (wide_integer_type(tp) || wide_integer_type(e1->topt))
+            return $(fresh_var(NULL, tp), am);
           if (s1 == s2)
             return $(t, am);
           break;
@@ -1295,10 +1334,9 @@ static $(term_t, assn_map_t) vcgen_rexp_inner(env_t env, exp_t e, assn_map_t ami
         case $(&Absyn::AppType(&Absyn::IntCon(_, Absyn::Long_sz), _), &Absyn::PointerType(pi)):
           if (Tcutil::get_bounds_exp_constrain(Absyn::bounds_one(), pi.ptr_atts.bounds, true) !=
               NULL) {
-            // casting a thin pointer to an (unsigned) int/long is okay -- we
-            // want to drop the cast here because it loses information about
-            // whether or not the term is null.
-            return $(t, am);
+            // A narrowing pointer cast can turn a nonnull address into zero.
+            // Do not reuse pointer identity as the resulting integer value.
+            return $(fresh_var(NULL, tp), am);
           }
           break;
         case $(&Absyn::PointerType(p2), &Absyn::PointerType(p1)):
@@ -1700,6 +1738,8 @@ static $(assn_map_t, assn_map_t) vcgen_test(env_t env, exp_t e, assn_map_t ain) 
     case &Absyn::Primop_e(p, &List(e1, &List(e2, NULL))):
       let $(t1, a1) = vcgen_debug_rexp(env, e1, ain);
       let $(t2, a2) = vcgen_debug_rexp(env, e2, a1);
+      if (opaque_primitive(p, e1->topt, e2->topt))
+        return $(a2, a2);
       let at        = a2;
       let af        = a2;
       switch
@@ -1757,10 +1797,7 @@ static $(assn_map_t, assn_map_t) vcgen_test(env_t env, exp_t e, assn_map_t ain) 
           // size is the same.
         case $(&Absyn::AppType(&Absyn::IntCon(u1, s1), _),
                &Absyn::AppType(&Absyn::IntCon(u2, s2), _)):
-          // wangyl: a hack to tell compiler that long and int have the same
-          // size FIX: this is machine dependent!
-          s1 = (s1 == Absyn::Long_sz ? Absyn::Int_sz : s1);
-          s2 = (s2 == Absyn::Long_sz ? Absyn::Int_sz : s2);
+          if (wide_integer_type(tp) || wide_integer_type(e1->topt)) break;
           if (s1 == s2)
             return vcgen_debug_test(env, e1, ain);
           break;

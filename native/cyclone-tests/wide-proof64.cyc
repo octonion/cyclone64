@@ -1,0 +1,42 @@
+#include "cyclone/library/std/core.h"
+using Core;
+extern "C" unsigned long abi_large_index(void);
+extern "C" void *abi_pointer_at(unsigned long);
+int main(int argc,string_t ?argv) {
+  int a[2]={10,20};
+  long x=0x100000000L;
+  int caught=0;
+  int bad=argc+2;
+  if(x!=0L) {
+    try { int value=a[bad]; return 1; } catch { default: caught++; break; }
+  }
+  unsigned long y=abi_large_index();
+  if(y>0xffffffffUL && (unsigned)y==1U) {
+    try { int value=a[bad]; return 2; } catch { default: caught++; break; }
+  }
+  long z=0x7fffffffffffffffL;
+  if(z>0x7fffffffL) {
+    try { int value=a[bad]; return 3; } catch { default: caught++; break; }
+  }
+  bool high=y>0xffffffffUL;
+  if(high) {
+    try { int value=a[bad]; return 5; } catch { default: caught++; break; }
+  }
+  y+=0xffffffffUL;
+  if(y==0x200000000UL) {
+    try { int value=a[bad]; return 6; } catch { default: caught++; break; }
+  }
+  void *opaque=abi_pointer_at(0x100000000UL);
+  if(opaque && (unsigned)opaque==0U) {
+    try { int value=a[bad]; return 7; } catch { default: caught++; break; }
+  }
+  int ?root=a;
+  int ?far=root+0xffffffffUL;
+  far+=1;
+  try { int value=far[0]; return 8; } catch { default: caught++; break; }
+  __uint128_t wide=((__uint128_t)1<<100)+7;
+  if(wide>0xffffffffUL && (unsigned)wide==7U) {
+    try { int value=a[bad]; return 9; } catch { default: caught++; break; }
+  }
+  return caught==8 ? 0 : 10;
+}

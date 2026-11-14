@@ -391,8 +391,9 @@ static void do_exp(env_t nv, exp_t e) {
 
               // check if we have eliminated the bound check in earlier pass
               let $(bds_ck, null_ck) = need_bound_null_check_annot(e);
-              if (bds_ck)
-                bds_ck = need_bounds_check_vcgen(nv, e1);
+              // Fat cursors can lie outside their allocation. The 32-bit VC
+              // model does not establish the full native conversion extent.
+              bds_ck = true;
               // only if we do need bounds check we will ensure the
               // bound is statically known
               if (bds_ck)
@@ -435,6 +436,10 @@ static void do_exp(env_t nv, exp_t e) {
           if (bds_ck && nv.vcgen_r)
             // try to eliminate the check using the vcgen.
             bds_ck = need_bounds_check_vcgen(nv, e1);
+          // Fat cursors have both lower and upper bounds, including temporary
+          // out-of-range cursors. The VC numelts model cannot establish both.
+          if (Tcutil::get_bounds_exp_constrain(bounds_one(), b, true) == NULL)
+            bds_ck = true;
           // The proof terms still use 32-bit Uint arithmetic. A wide index
           // must retain a runtime check even if that model claims it is safe.
           if (e2->topt != NULL) switch (compress((type_t)e2->topt)) {

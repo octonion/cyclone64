@@ -1,5 +1,27 @@
 Banshee64 / Cyclone64 native candidates — 2026-11-14
 
+PUBLIC FORK PREPARATION
+Repository: https://github.com/octonion/cyclone64 (public fork of TokTok/cyclone).
+The public main branch retains upstream and native conversion history. The root
+README documents dependencies, clone/build/install commands, scope and licenses.
+CI replaces the inherited TokTok workflows with Ubuntu 26.04 GCC 15 / Clang 21
+portable x86-64 builds, native checks, relocated installation checks, and a
+standalone Clang ASan/UBSan Banshee job. CI logs are retained as artifacts.
+
+New standalone Clang sanitizer validation exposed incompatible indirect calls
+in Banshee string hashes, typed lists and union-find combiners. Typed context
+adapters replace the casts; list sorting no longer uses a global comparator.
+Regression coverage includes signed integer callbacks, nested sorting,
+filter/drop/keep (including empty lists), and unification rollback. All seven
+Banshee clients and eight region persistence drivers now pass Clang ASan/UBSan
+with function-type checking and leak detection. This extends the prior GCC
+Banshee sanitizer evidence; it does not imply all untested callbacks are audited.
+
+Fresh GCC 15 and Clang 21 -O2 -g -march=x86-64 bootstraps and make check pass
+with these changes, each with 81/81 generated-C convergence. Build roots are
+build/github-gcc and build/github-clang; logs are native/logs/github-*.log.
+The older paths and assessments below are historical workstation records.
+
 UNIFIED MAKE BUILD / INSTALLATION
 The root Makefile now provides all, check, install and clean. Clean GCC 15 native
 and Clang 21 -march=x86-64 builds pass with 81/81 bootstrap convergence. Both pass

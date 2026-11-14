@@ -1,47 +1,155 @@
-# Cyclone Language Compiler
+# Cyclone64
 
-Cyclone is a safe dialect of C. It is designed to prevent buffer overflows, format string attacks, and memory management errors that are common in C programs, while retaining C's syntax and low-level control.
+[![Native build and tests](https://github.com/octonion/cyclone64/actions/workflows/native.yml/badge.svg)](https://github.com/octonion/cyclone64/actions/workflows/native.yml)
 
-This repository contains the source code for the Cyclone compiler, a self-hosting, source-to-source compiler that translates Cyclone code into C.
+Native 64-bit Cyclone compiler and Banshee constraint solver, with GNU Make
+builds and tests. Cyclone is a safe dialect of C; its compiler translates
+Cyclone source into C.
 
-## Native 64-bit build
+This is a development fork of [TokTok/cyclone](https://github.com/TokTok/cyclone),
+preserving its history. The LP64 conversion starts from upstream commit
+`c19c449365671fa10acad6307a95ffffae86dc69`. Both components live here:
+
+- **Cyclone64**: a source-bootstrapped compiler, runtime, standard library and
+  installed `cyclone64` compile/link driver.
+- **Banshee64**: an independently buildable `libbanshee64.a` constraint solver,
+  including region allocation, unification, SetIF/SetST, rollback and checkpoints.
+
+## Status and supported platform
+
+The current candidate has passed native Linux x86-64 builds with GCC 15 and
+Clang 21 on Ubuntu 26.04, self-bootstrap convergence across 81 generated C files,
+solver/runtime tests, compiler regressions and installed-client checks. Earlier
+compiler/runtime validation also includes ASan/UBSan. CI runs GCC and Clang builds
+and installed-client tests, plus independent Banshee sanitizer tests.
+
+This is an actively developed candidate, not a claim that every historical
+Cyclone feature or platform has been verified. Native objects use the new LP64
+calling convention and must be rebuilt together. Banshee checkpoints are for
+trusted input from the same build and ABI; custom expression types need codecs.
+The arithmetic prover still uses 32-bit terms, so wide operations retain
+conservative runtime checks. See [native/README.md](native/README.md) for
+semantics, supported driver options, validation details and remaining limits.
+
+## Dependencies
+
+Use GNU/Linux on x86-64 with GNU Make, Python 3.9 or newer, GCC, binutils,
+pkg-config, and development files for libbacktrace, libffi, OpenSSL/libcrypto and
+Boehm-Demers-Weiser GC. Python is also required by the installed driver.
+A GCC installation is required even when Clang compiles the C objects: the
+legacy libc binding generator uses GCC to preprocess system headers.
+
+On Ubuntu 26.04:
 
 ```sh
+sudo apt-get update
+sudo apt-get install build-essential gcc-15 libgcc-15-dev python3 pkg-config \
+  libffi-dev libssl-dev libgc-dev git
+# Optional alternative C compiler:
+sudo apt-get install clang-21
+```
+
+`libgcc-15-dev` supplies libbacktrace on this platform. Other distributions may
+package it separately. The build does not install packages or require Bazel.
+
+## Clone, build, test and install
+
+```sh
+git clone https://github.com/octonion/cyclone64.git
+cd cyclone64
 make all
 make check
 make install PREFIX="$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 ```
 
-The Make interface builds Banshee64 independently and bootstraps Cyclone64 from
-tracked sources. It installs the `cyclone64` compile/link driver, matching
-runtime and standard library, Banshee archive, public headers, and pkg-config
-metadata. Use `DESTDIR` for staged installations. See
-[native/README.md](native/README.md) for dependencies, overrides and validation.
+Build products and logs stay under `build/native`. The bootstrap uses tracked
+sources; no downloaded bootstrap binary or previous Cyclone installation is
+needed. `make check` covers Banshee, region persistence, runtime bounds and GC,
+Cyclone diagnostics and rejection tests, native layouts, the upstream test suite,
+compiler units, and bootstrap convergence. `make install` also compiles and runs
+small clients using the installed libraries and headers.
 
-GCC selection and architecture detection are automatic; `CC`, `LIBC_CC`, `ARCH`,
-`BUILD`, `CFLAGS`, `CPPFLAGS`, `LDFLAGS`, `AR` and `JOBS` are explicit overrides.
-The older Bazel files remain in the repository; the Make path is the validated
-native LP64 build.
+For example, save this as `hello.cyc`:
 
-## Project Structure
+```c
+#include <core.h>
+#include <stdio.h>
+using Core;
+int main(int argc, string_t ?argv) {
+  printf("Hello from Cyclone64!\n");
+  return 0;
+}
+```
 
-*   `library/`: Contains the core compiler source code and standard libraries.
-    *   `library/compiler/`: The Cyclone compiler implementation (written in Cyclone).
-    *   `library/banshee/`: Constraint solver used for flow analysis.
-    *   `library/std/`: The Cyclone standard library.
-*   `testsuite/`: Comprehensive test suite for the compiler.
-*   `tools/`: various utilities.
-*   `build_defs.bzl`: Custom Bazel definitions for the Cyclone build process.
+```sh
+cyclone64 hello.cyc -o hello
+./hello
+```
 
-## Architecture Overview
+The default chooses the newest installed stable GCC and native CPU architecture
+on Ryzen. Compiler and architecture overrides are explicit:
 
-The Cyclone compiler follows a classic multi-pass architecture but utilizes a **mutable AST** design where passes often modify the Abstract Syntax Tree in place.
+```sh
+make BUILD=build/portable CC=gcc-15 ARCH=-march=x86-64 JOBS=4 all check
+make BUILD=build/clang CC=clang-21 LIBC_CC=gcc-15 ARCH=-march=x86-64 all check
+```
 
-1.  **Parsing**: Uses `bison` (`parse.cyy`) and a custom lexer (`lex.cyl`) to produce an AST.
-2.  **Semantic Analysis**: A modular type-checking system (`tc*.cyc`) traverses the AST, enforcing Cyclone's advanced type rules (regions, pointers, effects). It relies on the Banshee constraint solver.
-3.  **Transformation/Lowering**: Several passes transform the AST to simplify it (e.g., `remove_aggregates.cyc`, `lower.cyc`).
-4.  **Code Generation**: The `toc.cyc` pass translates the Cyclone AST into a C AST, which is then emitted as C code.
+Use `ARCH=-march=x86-64` for binaries intended for other x86-64 machines.
+The selector reserves GCC 14 and `-march=knl` for detected Xeon Phi 7250 hardware
+when available; that hardware path has not yet been tested.
 
-## Contributing
+`BUILD`, `CC`, `LIBC_CC`, `AR`, `ARCH`, `CFLAGS`, `CPPFLAGS`, `LDFLAGS`, and `JOBS`
+are configurable. Repeat overrides on subsequent invocations, or export them.
+Changing compiler or flags requires a fresh `BUILD` or `make clean`.
+`make clean` removes only the selected managed build directory.
 
-See the `library/compiler` directory for more details on the compiler internals.
+Staged installation and the full installed-client check:
+
+```sh
+make install PREFIX=/opt/cyclone64 DESTDIR="$PWD/build/staging"
+python3 native/check-install.py --prefix build/staging/opt/cyclone64 \
+  --out build/installed-checks
+```
+
+Installations can be relocated. They contain `bin/cyclone64`, both static
+libraries, public headers, Cyclone standard-library headers, and pkg-config
+metadata. A Banshee C client can use:
+
+```sh
+cc client.c $(pkg-config --cflags --libs banshee64) -o client
+```
+
+## Build Banshee independently
+
+```sh
+make -f native/Makefile BUILD=build/banshee all check rlib-check
+```
+
+This produces `build/banshee/libbanshee64.a` without bootstrapping Cyclone.
+The independent build accepts the same compiler and architecture overrides.
+See [native/tests](native/tests) for client and checkpoint examples.
+
+## Development and provenance
+
+- [Native build and ABI guide](native/README.md)
+- [Native calling convention](native/NATIVE-LAYOUTS.txt)
+- [Diagnostic reference rationale](native/DIAGNOSTICS.txt)
+- [Historical workstation validation notes](native/STATUS.txt) and
+  [32-bit comparison notes](native/REFERENCE32.txt). Paths and logs in these
+  records describe the original validation workspace, not prerequisites for a clone.
+- [Compiler sources](library/compiler), [Banshee sources](library/banshee),
+  [standard library](library/std), and [test suite](testsuite)
+
+Please include a minimal reproducer, the commit, OS, compiler versions and build
+overrides when reporting a problem. Changes should pass `make check`; installation
+changes should also pass `native/check-install.py`. CI uses portable x86-64 flags
+and preserves logs as workflow artifacts. Older Bazel files remain for historical
+reference; GNU Make is the supported native build entry point.
+
+## License and attribution
+
+Original authorship and copyright notices are retained. See [LICENSE](LICENSE)
+(GPLv3), [LICENSE.LIB](LICENSE.LIB) (LGPLv2.1), and the notices in individual files,
+including Banshee and bundled tools. This fork does not relicense those components.

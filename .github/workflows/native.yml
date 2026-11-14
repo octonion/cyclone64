@@ -1,0 +1,101 @@
+name: Native build and tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native / ${{ matrix.cc }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc-15, clang-21]
+    env:
+      CC: ${{ matrix.cc }}
+      LIBC_CC: gcc-15
+      ARCH: -march=x86-64
+      BUILD: build/ci
+      JOBS: '4'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-15 libgcc-15-dev clang-21 python3 pkg-config libffi-dev libssl-dev libgc-dev
+      - name: Record toolchain
+        run: |
+          uname -a
+          "$CC" --version
+          "$LIBC_CC" --version
+          python3 --version
+          pkg-config --modversion libffi libcrypto bdw-gc
+      - name: Bootstrap and compare generated C
+        run: make all
+      - name: Run native test suites
+        run: make check
+      - name: Install into staging directory
+        run: make install PREFIX=/opt/cyclone64 DESTDIR="$PWD/build/staging"
+      - name: Relocate and test installed toolchain
+        run: |
+          mv build/staging/opt/cyclone64 "build/relocated toolchain"
+          python3 native/check-install.py --prefix "build/relocated toolchain" --out build/installed-checks
+      - name: Preserve validation logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-${{ matrix.cc }}-logs
+          retention-days: 14
+          path: |
+            build/ci/logs/
+            build/ci/unified-build.json
+            build/ci/src/native/bootstrap/convergence.json
+            build/ci/src/native/compiler-tests/**/*.log
+            build/ci/src/native/compiler-tests/**/*.json
+            build/installed-checks/
+
+  banshee-sanitizers:
+    name: Banshee / ASan + UBSan
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    env:
+      CC: clang-21
+      ARCH: -march=x86-64
+      CFLAGS: -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+      ASAN_OPTIONS: detect_leaks=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang-21
+      - name: Run independent solver and region tests
+        shell: bash
+        run: |
+          mkdir -p build
+          set -o pipefail
+          make -f native/Makefile BUILD=build/banshee-asan -j4 check rlib-check 2>&1 | tee build/banshee-sanitizers.log
+      - name: Preserve sanitizer log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: banshee-sanitizer-log
+          retention-days: 14
+          path: build/banshee-sanitizers.log

@@ -1,8 +1,13 @@
-# Native LP64 work on seymour
+# Native LP64 build and validation guide
 
-Work on TokTok/cyclone is isolated on `native-lp64-seymour`, based on
-`c19c449365671fa10acad6307a95ffffae86dc69`. The prior `/mnt/data` kit was not
-available on this workstation and was not used as evidence.
+Cyclone64 preserves TokTok/cyclone history, with the LP64 work based on
+`c19c449365671fa10acad6307a95ffffae86dc69`. See the root [README](../README.md)
+for clone instructions and distribution dependencies.
+
+Historical validation ran on the `seymour` workstation, on branch
+`native-lp64-seymour`. Referenced local builds and logs are historical evidence,
+not files needed to build a fresh clone. The earlier experimental build kit was
+not available there and was not used as evidence.
 
 See [STATUS.txt](STATUS.txt) for the validated candidate paths and scope, and
 [NATIVE-LAYOUTS.txt](NATIVE-LAYOUTS.txt) for the corrected generic calling
@@ -132,6 +137,10 @@ expected-abort checks.
 * Sparse full-uintptr ownership/translation maps, pointer-width alignment masks,
   checked multiplication/narrowing, big-allocation one-past-end reservation,
   and ownership removal on free even with `NMEMDEBUG`.
+* Typed adapters preserve callback signatures in list and union-find operations;
+  string hash callbacks use the hash-table key signature. Clang standalone
+  ASan/UBSan checks include function-type checking and regressions for integer
+  callbacks, nested sorting, empty-list filtering and union-find rollback.
 * Correct pointer-sized container payload handling; no writes through int-sized
   output buffers. Hash copies allocate buckets in their destination region.
 * SetST bounds use snapshots through union-find history. Tests cover nested

@@ -156,7 +156,15 @@ bool uf_union(struct uf_element_ *a, struct uf_element_ *b) {
   }
 }
 
-bool uf_unify(combine_fn_ptr combine, struct uf_element_ *a, struct uf_element_ *b) {
+static uf_info untyped_combine_adapter(uf_info a, uf_info b, void *context) {
+  return (*(combine_fn_ptr *)context)(a, b);
+}
+
+bool uf_unify(combine_fn_ptr combine, uf_element a, uf_element b) {
+  return uf_unify_ctx(untyped_combine_adapter, &combine, a, b);
+}
+
+bool uf_unify_ctx(uf_combine_ctx_fn combine, void *context, uf_element a, uf_element b) {
   struct uf_element_ *e1 = find(a);
   struct uf_element_ *e2 = find(b);
 
@@ -167,7 +175,7 @@ bool uf_unify(combine_fn_ptr combine, struct uf_element_ *a, struct uf_element_ 
 
   else if (e1->rank < e2->rank) {
     ustack_elt ue = make_ustack_elt(e1, e2->info);
-    e2->info = combine(e2->info, e1->info);
+    e2->info = combine(e2->info, e1->info, context);
     e1->kind = uf_link;
     e1->link = e2;
 
@@ -180,7 +188,7 @@ bool uf_unify(combine_fn_ptr combine, struct uf_element_ *a, struct uf_element_ 
 
   else if (e1->rank > e2->rank) {
     ustack_elt ue = make_ustack_elt(e2, e1->info);
-    e1->info = combine(e1->info, e2->info);
+    e1->info = combine(e1->info, e2->info, context);
     e2->kind = uf_link;
     e2->link = e1;
 
@@ -193,7 +201,7 @@ bool uf_unify(combine_fn_ptr combine, struct uf_element_ *a, struct uf_element_ 
 
   else {
     ustack_elt ue = make_ustack_elt(e1, e2->info);
-    e2->info = combine(e2->info, e1->info);
+    e2->info = combine(e2->info, e1->info, context);
 
     e2->rank++;
     e1->kind = uf_link;

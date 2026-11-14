@@ -191,12 +191,12 @@ struct list *list_app(struct list *l, app_fn app) {
   return l;
 }
 
-void *list_find(struct list *l, eq_fn eq) {
+void *list_find_ctx(struct list *l, list_eq_ctx_fn eq, void *context) {
   list_node n = NULL;
   assert(l);
 
   scan_node(l->head, n) {
-    if (eq(n->data))
+    if (eq(n->data, context))
       return n->data;
   }
 
@@ -220,21 +220,22 @@ void *list_last(struct list *l) {
 }
 
 /* Drop the first list element s{atisfying eq */
-void list_drop(struct list *l, eq_fn eq) {
+void list_drop_ctx(struct list *l, list_eq_ctx_fn eq, void *context) {
   list_node prev, n;
   assert(l);
 
   if (l->head == NULL)
     return;
-  else if (eq(l->head->data)) {
+  else if (eq(l->head->data, context)) {
     l->head = l->head->next;
     l->length--;
+    if (!l->head) l->tail = NULL;
     return;
   } else {
     prev = l->head;
 
     scan_node(l->head->next, n) {
-      if (eq(n->data)) {
+      if (eq(n->data, context)) {
         if (n == l->tail) {
           l->tail = prev;
           assert(n->next == NULL);
@@ -248,7 +249,7 @@ void list_drop(struct list *l, eq_fn eq) {
   }
 }
 
-struct list *list_filter(region r, struct list *l, eq_fn eq) {
+struct list *list_filter_ctx(region r, struct list *l, list_eq_ctx_fn eq, void *context) {
   struct list *result;
   list_node n = NULL;
   assert(l);
@@ -256,7 +257,7 @@ struct list *list_filter(region r, struct list *l, eq_fn eq) {
   result = new_list(r, l->persist_kind);
 
   scan_node(l->head, n) {
-    if (eq(n->data)) {
+    if (eq(n->data, context)) {
       list_cons(n->data, result);
     }
   }
@@ -266,18 +267,19 @@ struct list *list_filter(region r, struct list *l, eq_fn eq) {
   return result;
 }
 
-struct list *list_keep(struct list *l, eq_fn eq) {
+struct list *list_keep_ctx(struct list *l, list_eq_ctx_fn eq, void *context) {
   list_node prev, n;
   assert(l);
 
-  while (l->head && !eq(l->head->data)) {
+  while (l->head && !eq(l->head->data, context)) {
     l->head = l->head->next;
     l->length--;
   }
 
+  if (!l->head) { l->tail = NULL; return l; }
   prev = l->head;
   scan_node(l->head->next, n) {
-    if (!eq(n->data)) {
+    if (!eq(n->data, context)) {
       prev->next = n->next;
       l->length--;
     } else
@@ -291,7 +293,23 @@ struct list *list_keep(struct list *l, eq_fn eq) {
   return l;
 }
 
-struct list *list_filter2(struct list *l, eq_fn eq) { return list_filter(node_region(l), l, eq); }
+struct list *list_filter2_ctx(struct list *l, list_eq_ctx_fn eq, void *context) { return list_filter_ctx(node_region(l), l, eq, context); }
+
+static bool untyped_eq_adapter(const void *value, void *context) {
+  return (*(eq_fn *)context)(value);
+}
+
+void *list_find(struct list *l, eq_fn eq) { return list_find_ctx(l, untyped_eq_adapter, &eq); }
+void list_drop(struct list *l, eq_fn eq) { list_drop_ctx(l, untyped_eq_adapter, &eq); }
+struct list *list_filter(region r, struct list *l, eq_fn eq) {
+  return list_filter_ctx(r, l, untyped_eq_adapter, &eq);
+}
+struct list *list_filter2(struct list *l, eq_fn eq) {
+  return list_filter2_ctx(l, untyped_eq_adapter, &eq);
+}
+struct list *list_keep(struct list *l, eq_fn eq) {
+  return list_keep_ctx(l, untyped_eq_adapter, &eq);
+}
 
 struct list *list_copy(region r, struct list *l) {
   struct list *result;
@@ -338,8 +356,8 @@ struct list *list_copy_upto(region r, struct list *l, int len) {
 
 #include <stdio.h>
 
-void *sort_linked_list(void *p, unsigned index, int (*compare)(const void *, const void *),
-                       unsigned long *pcount) {
+static void *sort_linked_list_ctx(void *p, unsigned index, list_cmp_ctx_fn compare,
+                                  void *context, unsigned long *pcount) {
   unsigned base;
   unsigned long block_size;
 
@@ -392,7 +410,7 @@ void *sort_linked_list(void *p, unsigned index, int (*compare)(const void *, con
         } else if (n1 == 0 || tape1->count == 0) {
           chosen_tape = tape0;
           n0--;
-        } else if ((*compare)(tape0->first, tape1->first) > 0) {
+        } else if ((*compare)(tape0->first, tape1->first, context) > 0) {
           chosen_tape = tape1;
           n1--;
         } else {
@@ -419,23 +437,41 @@ void *sort_linked_list(void *p, unsigned index, int (*compare)(const void *, con
   return tape[base].first;
 }
 
-static comparator_fn ls_cmp;
-
-static int compare(const void *node1, const void *node2) {
-  return ls_cmp(((const struct list_node_ *)node1)->data, ((const struct list_node_ *)node2)->data);
+static int untyped_cmp_adapter(const void *a, const void *b, void *context) {
+  return (*(comparator_fn *)context)(a, b);
 }
 
-struct list *list_sort(struct list *l, comparator_fn cmp) {
+void *sort_linked_list(void *p, unsigned index, comparator_fn compare,
+                       unsigned long *pcount) {
+  return sort_linked_list_ctx(p, index, untyped_cmp_adapter, &compare, pcount);
+}
+
+struct list_compare_context { list_cmp_ctx_fn compare; void *context; };
+static int compare_nodes(const void *a, const void *b, void *opaque) {
+  struct list_compare_context *ctx = opaque;
+  return ctx->compare(((const struct list_node_ *)a)->data,
+                      ((const struct list_node_ *)b)->data, ctx->context);
+}
+
+struct list *list_sort_ctx(struct list *l, list_cmp_ctx_fn cmp, void *context) {
   unsigned long pcount;
-  ls_cmp = cmp;
-  l->head = sort_linked_list(l->head, 1, compare, &pcount);
+  struct list_compare_context ctx = {cmp, context};
+  l->head = sort_linked_list_ctx(l->head, 1, compare_nodes, &ctx, &pcount);
   l->tail = fetch_tail(l->head);
   assert(pcount == l->length);
   return l;
 }
 
+struct list *list_merge_ctx(struct list *a, struct list *b, list_cmp_ctx_fn cmp, void *context) {
+  return list_sort_ctx(list_append(a, b), cmp, context);
+}
+
+struct list *list_sort(struct list *l, comparator_fn cmp) {
+  return list_sort_ctx(l, untyped_cmp_adapter, &cmp);
+}
+
 struct list *list_merge(struct list *a, struct list *b, comparator_fn cmp) {
-  return list_sort(list_append(a, b), cmp);
+  return list_merge_ctx(a, b, untyped_cmp_adapter, &cmp);
 }
 
 void list_scan(struct list *a, struct list_scanner *scan) {

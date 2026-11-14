@@ -100,11 +100,11 @@ unsigned long ptr_hash(const void *ptr);
 /* Return TRUE iff ptr1 == ptr2 */
 bool ptr_eq(const void *ptr1, const void *ptr2);
 
-/* Hash a string */
-unsigned long string_hash(const char *str);
+/* Hash a string key; the signature matches hash_fn without a function cast. */
+unsigned long string_hash(const void *str);
 
 /* Return TRUE iff s1 == s2 */
-bool string_eq(const char *s1, const char *s2);
+bool string_eq(const void *s1, const void *s2);
 
 /* A total ordering on pointers.  Returns 0 if ptr1 = ptr2, a value <0
    if ptr1 < ptr2, or a value >0 if ptr1 > ptr2. */

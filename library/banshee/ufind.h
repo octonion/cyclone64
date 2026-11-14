@@ -69,6 +69,8 @@ uf_info uf_get_info(uf_element);
 /* Put two elements in the same equivalence class. The information for
  * the equivalence class is determined by the combine_fn_ptr */
 bool uf_unify(combine_fn_ptr, uf_element, uf_element);
+typedef uf_info (*uf_combine_ctx_fn)(uf_info, uf_info, void *);
+bool uf_unify_ctx(uf_combine_ctx_fn, void *, uf_element, uf_element);
 
 /* Put two elements in the same equivalence class. The information for
  * the equivalence class is picked from one of the two elements */
@@ -110,22 +112,30 @@ void update_module_uf(translation t, FILE *f);
   void name##_update(name e1, type info);
 
 #define DEFINE_NONPTR_UFIND(name, type)                                                     \
-  name new_##name(region r, type info) { return (name)new_uf_element(r, (void *)info, 0); } \
-  type name##_get_info(name elem) { return (type)uf_get_info((uf_element)elem); }           \
+  static uf_info name##_combine_adapter(uf_info a, uf_info b, void *context) { \
+    return (uf_info)(intptr_t)(*(name##_combine_fn_ptr *)context)( \
+        (type)(intptr_t)a, (type)(intptr_t)b); \
+  } \
+  name new_##name(region r, type info) { return (name)new_uf_element(r, (void *)(intptr_t)info, 0); } \
+  type name##_get_info(name elem) { return (type)(intptr_t)uf_get_info((uf_element)elem); }           \
   bool name##_unify(name##_combine_fn_ptr cmb, name e1, name e2) {                          \
-    return uf_unify((combine_fn_ptr)cmb, (uf_element)e1, (uf_element)e2);                   \
+    return uf_unify_ctx(name##_combine_adapter, &cmb, (uf_element)e1, (uf_element)e2);                   \
   }                                                                                         \
   bool name##_union(name e1, name e2) { return uf_union((uf_element)e1, (uf_element)e2); }  \
   bool name##_eq(name e1, name e2) { return uf_eq((uf_element)e1, (uf_element)e2); }        \
-  void name##_update(name e1, type info) { return uf_update((uf_element)e1, (uf_info)info); }
+  void name##_update(name e1, type info) { return uf_update((uf_element)e1, (uf_info)(intptr_t)info); }
 
 #define DEFINE_UFIND(name, type)                                                           \
+  static uf_info name##_combine_adapter(uf_info a, uf_info b, void *context) { \
+    return (uf_info)(intptr_t)(*(name##_combine_fn_ptr *)context)( \
+        (type)(intptr_t)a, (type)(intptr_t)b); \
+  } \
   name new_##name(region r, type info) {                                                   \
     return (name)new_uf_element(r, (void *)info, BANSHEE_PERSIST_KIND_##type);             \
   }                                                                                        \
   type name##_get_info(name elem) { return (type)uf_get_info((uf_element)elem); }          \
   bool name##_unify(name##_combine_fn_ptr cmb, name e1, name e2) {                         \
-    return uf_unify((combine_fn_ptr)cmb, (uf_element)e1, (uf_element)e2);                  \
+    return uf_unify_ctx(name##_combine_adapter, &cmb, (uf_element)e1, (uf_element)e2);                  \
   }                                                                                        \
   bool name##_union(name e1, name e2) { return uf_union((uf_element)e1, (uf_element)e2); } \
   bool name##_eq(name e1, name e2) { return uf_eq((uf_element)e1, (uf_element)e2); }       \

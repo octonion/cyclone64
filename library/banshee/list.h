@@ -42,6 +42,9 @@ typedef void *list_data;
 typedef void (*app_fn)(void *);
 typedef bool (*eq_fn)(const void *);
 typedef int (*comparator_fn)(const void *, const void *);
+/* Context adapters preserve the actual callback type of generated typed lists. */
+typedef bool (*list_eq_ctx_fn)(const void *, void *);
+typedef int (*list_cmp_ctx_fn)(const void *, const void *, void *);
 
 struct list;
 
@@ -80,6 +83,14 @@ struct list *list_reverse(struct list *a);
 struct list *list_from_array(region r, void **data, int length);
 void **array_from_list(region r, struct list *a);
 int list_stamp(struct list *a);
+void *list_find_ctx(struct list *, list_eq_ctx_fn, void *);
+void list_drop_ctx(struct list *, list_eq_ctx_fn, void *);
+struct list *list_filter_ctx(region, struct list *, list_eq_ctx_fn, void *);
+struct list *list_filter2_ctx(struct list *, list_eq_ctx_fn, void *);
+struct list *list_keep_ctx(struct list *, list_eq_ctx_fn, void *);
+struct list *list_sort_ctx(struct list *, list_cmp_ctx_fn, void *);
+struct list *list_merge_ctx(struct list *, struct list *, list_cmp_ctx_fn, void *);
+
 
 #define DECLARE_OPAQUE_LIST(name, type)       \
   typedef struct list_scanner name##_scanner; \
@@ -123,6 +134,12 @@ int list_stamp(struct list *a);
   type *name##_array_from_list(region r, name a)
 
 #define DEFINE_LIST(name, type)                                                                   \
+  static bool name##_eq_adapter(const void *value, void *context) { \
+    return (*(name##_eq_fn *)context)((type)(intptr_t)value); \
+  } \
+  static int name##_cmp_adapter(const void *a, const void *b, void *context) { \
+    return (*(name##_comparator_fn *)context)((type)(intptr_t)a, (type)(intptr_t)b); \
+  } \
   name new_##name(region r) { return (name)new_list(r, BANSHEE_PERSIST_KIND_##type); }            \
   name new_persistent_##name() { return (name)new_list(NULL, BANSHEE_PERSIST_KIND_##type); }      \
   int name##_length(name a) { return list_length((struct list *)a); }                             \
@@ -134,33 +151,36 @@ int list_stamp(struct list *a);
     return (name)list_append_tail((void *)data, (struct list *)a);                                \
   }                                                                                               \
   name name##_app(name a, name##_app_fn app) {                                                    \
-    return (name)list_app((struct list *)a, (app_fn)app);                                         \
+    struct list_scanner scan; void *value;                                                         \
+    list_scan((struct list *)a, &scan);                                                                   \
+    while (list_next(&scan, &value)) app((type)(intptr_t)value);                                            \
+    return a;                                                                               \
   }                                                                                               \
   type name##_find(name a, name##_eq_fn eq) {                                                     \
-    return (type)list_find((struct list *)a, (eq_fn)eq);                                          \
+    return (type)list_find_ctx((struct list *)a, name##_eq_adapter, &eq);                                          \
   }                                                                                               \
   name name##_tail(name a) { return (name)list_tail((struct list *)a); }                          \
   type name##_head(name a) { return (type)list_head((struct list *)a); }                          \
   type name##_last(name a) { return (type)list_last((struct list *)a); }                          \
-  void name##_drop(name a, name##_eq_fn eq) { list_drop((struct list *)a, (eq_fn)eq); }           \
+  void name##_drop(name a, name##_eq_fn eq) { list_drop_ctx((struct list *)a, name##_eq_adapter, &eq); }           \
   name name##_filter(region r, name a, name##_eq_fn eq) {                                         \
-    return (name)list_filter(r, (struct list *)a, (eq_fn)eq);                                     \
+    return (name)list_filter_ctx(r, (struct list *)a, name##_eq_adapter, &eq);                                     \
   }                                                                                               \
   name name##_keep(name a, name##_eq_fn eq) {                                                     \
-    return (name)list_keep((struct list *)a, (eq_fn)eq);                                          \
+    return (name)list_keep_ctx((struct list *)a, name##_eq_adapter, &eq);                                          \
   }                                                                                               \
   name name##_filter2(name a, name##_eq_fn eq) {                                                  \
-    return (name)list_filter2((struct list *)a, (eq_fn)eq);                                       \
+    return (name)list_filter2_ctx((struct list *)a, name##_eq_adapter, &eq);                                       \
   }                                                                                               \
   name name##_copy(region r, name a) { return (name)list_copy(r, (struct list *)a); }             \
   name name##_copy_upto(region r, name a, int l) {                                                \
     return (name)list_copy_upto(r, (struct list *)a, l);                                          \
   }                                                                                               \
   name name##_sort(name a, name##_comparator_fn cmp) {                                            \
-    return (name)list_sort((struct list *)a, (comparator_fn)cmp);                                 \
+    return (name)list_sort_ctx((struct list *)a, name##_cmp_adapter, &cmp);                                 \
   }                                                                                               \
   name name##_merge(name a, name b, name##_comparator_fn cmp) {                                   \
-    return (name)list_merge((struct list *)a, (struct list *)b, (comparator_fn)cmp);              \
+    return (name)list_merge_ctx((struct list *)a, (struct list *)b, name##_cmp_adapter, &cmp);              \
   }                                                                                               \
   void name##_scan(name a, name##_scanner *scan) {                                                \
     list_scan((struct list *)a, (struct list_scanner *)scan);                                     \
@@ -182,6 +202,12 @@ int list_stamp(struct list *a);
   type *name##_array_from_list(region r, name a)
 
 #define DEFINE_KIND_LIST(name, type, kind)                                                        \
+  static bool name##_eq_adapter(const void *value, void *context) { \
+    return (*(name##_eq_fn *)context)((type)(intptr_t)value); \
+  } \
+  static int name##_cmp_adapter(const void *a, const void *b, void *context) { \
+    return (*(name##_comparator_fn *)context)((type)(intptr_t)a, (type)(intptr_t)b); \
+  } \
   name new_##name(region r) { return (name)new_list(r, kind); }                                   \
   name new_persistent_##name() { return (name)new_list(NULL, kind); }                             \
   int name##_length(name a) { return list_length((struct list *)a); }                             \
@@ -193,33 +219,36 @@ int list_stamp(struct list *a);
     return (name)list_append_tail((void *)data, (struct list *)a);                                \
   }                                                                                               \
   name name##_app(name a, name##_app_fn app) {                                                    \
-    return (name)list_app((struct list *)a, (app_fn)app);                                         \
+    struct list_scanner scan; void *value;                                                         \
+    list_scan((struct list *)a, &scan);                                                                   \
+    while (list_next(&scan, &value)) app((type)(intptr_t)value);                                            \
+    return a;                                                                               \
   }                                                                                               \
   type name##_find(name a, name##_eq_fn eq) {                                                     \
-    return (type)list_find((struct list *)a, (eq_fn)eq);                                          \
+    return (type)list_find_ctx((struct list *)a, name##_eq_adapter, &eq);                                          \
   }                                                                                               \
   name name##_tail(name a) { return (name)list_tail((struct list *)a); }                          \
   type name##_head(name a) { return (type)list_head((struct list *)a); }                          \
   type name##_last(name a) { return (type)list_last((struct list *)a); }                          \
-  void name##_drop(name a, name##_eq_fn eq) { list_drop((struct list *)a, (eq_fn)eq); }           \
+  void name##_drop(name a, name##_eq_fn eq) { list_drop_ctx((struct list *)a, name##_eq_adapter, &eq); }           \
   name name##_filter(region r, name a, name##_eq_fn eq) {                                         \
-    return (name)list_filter(r, (struct list *)a, (eq_fn)eq);                                     \
+    return (name)list_filter_ctx(r, (struct list *)a, name##_eq_adapter, &eq);                                     \
   }                                                                                               \
   name name##_keep(name a, name##_eq_fn eq) {                                                     \
-    return (name)list_keep((struct list *)a, (eq_fn)eq);                                          \
+    return (name)list_keep_ctx((struct list *)a, name##_eq_adapter, &eq);                                          \
   }                                                                                               \
   name name##_filter2(name a, name##_eq_fn eq) {                                                  \
-    return (name)list_filter2((struct list *)a, (eq_fn)eq);                                       \
+    return (name)list_filter2_ctx((struct list *)a, name##_eq_adapter, &eq);                                       \
   }                                                                                               \
   name name##_copy(region r, name a) { return (name)list_copy(r, (struct list *)a); }             \
   name name##_copy_upto(region r, name a, int l) {                                                \
     return (name)list_copy_upto(r, (struct list *)a, l);                                          \
   }                                                                                               \
   name name##_sort(name a, name##_comparator_fn cmp) {                                            \
-    return (name)list_sort((struct list *)a, (comparator_fn)cmp);                                 \
+    return (name)list_sort_ctx((struct list *)a, name##_cmp_adapter, &cmp);                                 \
   }                                                                                               \
   name name##_merge(name a, name b, name##_comparator_fn cmp) {                                   \
-    return (name)list_merge((struct list *)a, (struct list *)b, (comparator_fn)cmp);              \
+    return (name)list_merge_ctx((struct list *)a, (struct list *)b, name##_cmp_adapter, &cmp);              \
   }                                                                                               \
   void name##_scan(name a, name##_scanner *scan) {                                                \
     list_scan((struct list *)a, (struct list_scanner *)scan);                                     \
@@ -240,6 +269,12 @@ int list_stamp(struct list *a);
   }
 
 #define DEFINE_NONPTR_LIST(name, type)                                                            \
+  static bool name##_eq_adapter(const void *value, void *context) { \
+    return (*(name##_eq_fn *)context)((type)(intptr_t)value); \
+  } \
+  static int name##_cmp_adapter(const void *a, const void *b, void *context) { \
+    return (*(name##_comparator_fn *)context)((type)(intptr_t)a, (type)(intptr_t)b); \
+  } \
   name new_##name(region r) { return (name)new_list(r, 0); }                                      \
   name new_persistent_##name() { return (name)new_list(NULL, 0); }                                \
   int name##_length(name a) { return list_length((struct list *)a); }                             \
@@ -251,33 +286,36 @@ int list_stamp(struct list *a);
     return (name)list_append_tail((void *)(intptr_t)data, (struct list *)a);                              \
   }                                                                                               \
   name name##_app(name a, name##_app_fn app) {                                                    \
-    return (name)list_app((struct list *)a, (app_fn)app);                                         \
+    struct list_scanner scan; void *value;                                                         \
+    list_scan((struct list *)a, &scan);                                                                   \
+    while (list_next(&scan, &value)) app((type)(intptr_t)value);                                            \
+    return a;                                                                               \
   }                                                                                               \
   type name##_find(name a, name##_eq_fn eq) {                                                     \
-    return (type)(uintptr_t)list_find((struct list *)a, (eq_fn)eq);                               \
+    return (type)(uintptr_t)list_find_ctx((struct list *)a, name##_eq_adapter, &eq);                               \
   }                                                                                               \
   name name##_tail(name a) { return (name)list_tail((struct list *)a); }                          \
   type name##_head(name a) { return (type)(uintptr_t)list_head((struct list *)a); }               \
   type name##_last(name a) { return (type)(uintptr_t)list_last((struct list *)a); }               \
-  void name##_drop(name a, name##_eq_fn eq) { list_drop((struct list *)a, (eq_fn)eq); }           \
+  void name##_drop(name a, name##_eq_fn eq) { list_drop_ctx((struct list *)a, name##_eq_adapter, &eq); }           \
   name name##_filter(region r, name a, name##_eq_fn eq) {                                         \
-    return (name)list_filter(r, (struct list *)a, (eq_fn)eq);                                     \
+    return (name)list_filter_ctx(r, (struct list *)a, name##_eq_adapter, &eq);                                     \
   }                                                                                               \
   name name##_keep(name a, name##_eq_fn eq) {                                                     \
-    return (name)list_keep((struct list *)a, (eq_fn)eq);                                          \
+    return (name)list_keep_ctx((struct list *)a, name##_eq_adapter, &eq);                                          \
   }                                                                                               \
   name name##_filter2(name a, name##_eq_fn eq) {                                                  \
-    return (name)list_filter2((struct list *)a, (eq_fn)eq);                                       \
+    return (name)list_filter2_ctx((struct list *)a, name##_eq_adapter, &eq);                                       \
   }                                                                                               \
   name name##_copy(region r, name a) { return (name)list_copy(r, (struct list *)a); }             \
   name name##_copy_upto(region r, name a, int l) {                                                \
     return (name)list_copy_upto(r, (struct list *)a, l);                                          \
   }                                                                                               \
   name name##_sort(name a, name##_comparator_fn cmp) {                                            \
-    return (name)list_sort((struct list *)a, (comparator_fn)cmp);                                 \
+    return (name)list_sort_ctx((struct list *)a, name##_cmp_adapter, &cmp);                                 \
   }                                                                                               \
   name name##_merge(name a, name b, name##_comparator_fn cmp) {                                   \
-    return (name)list_merge((struct list *)a, (struct list *)b, (comparator_fn)cmp);              \
+    return (name)list_merge_ctx((struct list *)a, (struct list *)b, name##_cmp_adapter, &cmp);              \
   }                                                                                               \
   void name##_scan(name a, name##_scanner *scan) {                                                \
     list_scan((struct list *)a, (struct list_scanner *)scan);                                     \
@@ -300,7 +338,7 @@ int list_stamp(struct list *a);
   int name##_stamp(name a) { return list_stamp((struct list *)a); }                               \
   type *name##_array_from_list(region r, name a) {                                                \
     type *result = rarrayalloc(r, name##_length(a), type);                                                \
-    name##_scanner scan; int i = 0; name##_scan(a, &scan);                                                \
+    name##_scanner scan; int i = 0; list_scan((struct list *)a, &scan);                                                \
     while (name##_next(&scan, &result[i])) ++i;                                                           \
     return result;                                                                                        \
   }

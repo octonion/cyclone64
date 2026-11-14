@@ -142,13 +142,13 @@ hash_table make_hash_table(region r, unsigned long size, hash_fn hash, keyeq_fn 
 }
 
 hash_table make_persistent_string_hash_table(unsigned long size, int data_persist_kind) {
-  return make_hash_table_int(NULL, size, (hash_fn)string_hash, (keyeq_fn)string_eq,
+  return make_hash_table_int(NULL, size, string_hash, string_eq,
                              STRING_PERSIST_KIND, data_persist_kind);
 }
 
 /* Make a hash table for strings. */
 hash_table make_string_hash_table(region rhash, unsigned long size) {
-  return make_hash_table(rhash, size, (hash_fn)string_hash, (keyeq_fn)string_eq);
+  return make_hash_table(rhash, size, string_hash, string_eq);
 }
 
 /* Zero out ht.  Doesn't reclaim bucket space. */

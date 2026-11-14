@@ -238,8 +238,8 @@ unsigned long ptr_hash(const void *ptr) { return (unsigned long)ptr >> 3; }
 /* Return TRUE iff ptr1 == ptr2 */
 bool ptr_eq(const void *ptr1, const void *ptr2) { return ptr1 == ptr2; }
 
-/* Hash a string */
-unsigned long string_hash(const char *str) {
+/* Hash a string key; the signature matches hash_fn without a function cast. */
+unsigned long string_hash(const void *str) {
   const char *c;
   unsigned long h;
 
@@ -253,10 +253,10 @@ unsigned long string_hash(const char *str) {
 }
 
 /* Return TRUE iff s1 == s2 */
-bool string_eq(const char *s1, const char *s2) {
+bool string_eq(const void *s1, const void *s2) {
   if (!s1 || !s2) /* Nulls are all distinct */
     return FALSE;
-  return !strcmp(s1, s2);
+  return !strcmp((const char *)s1, (const char *)s2);
 }
 
 /* A total ordering on pointers.  Returns 0 if ptr1 = ptr2, a value <0

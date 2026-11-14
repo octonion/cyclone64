@@ -1173,43 +1173,48 @@ static bool is_relation(Absyn::primop_t p) {
   }
 }
 
-static unsigned eval_binop(Absyn::primop_t p, unsigned c1, unsigned c2) {
-  // wangyl: FIX??  here we are assuming that all operations are performed
-  // on 32 bit words, and their type (whether sighed/unsigned) would not
-  // change the result of the operation.
+static $(bool, unsigned) eval_binop(Absyn::primop_t p, unsigned c1, unsigned c2) {
+  // Constraint constants are 32-bit words. Undefined arithmetic must remain
+  // symbolic: never let a proof simplification execute it in the compiler.
   switch (p) {
     case Absyn::Plus:
-      return c1 + c2;
+      return $(true, c1 + c2);
     case Absyn::Times:
-      return c1 * c2;
+      return $(true, c1 * c2);
     case Absyn::Minus:
-      return c1 - c2;
+      return $(true, c1 - c2);
     case Absyn::UDiv:
-      return c1 / c2; /* FIX: c2 == 0? */
+      if (c2 == 0) return $(false, 0);
+      return $(true, c1 / c2);
     case Absyn::UMod:
-      return c1 % c2; /* FIX: c2 == 0? */
+      if (c2 == 0) return $(false, 0);
+      return $(true, c1 % c2);
     case Absyn::Div:
-      return (int)c1 / (int)c2;
+      if (c2 == 0 || ((int)c1 == INT_MIN && (int)c2 == -1)) return $(false, 0);
+      return $(true, (int)c1 / (int)c2);
     case Absyn::Mod:
-      return (int)c1 % (int)c2;
+      if (c2 == 0 || ((int)c1 == INT_MIN && (int)c2 == -1)) return $(false, 0);
+      return $(true, (int)c1 % (int)c2);
     case Absyn::Eq:
-      return c1 == c2;
+      return $(true, c1 == c2);
     case Absyn::Neq:
-      return c1 != c2;
+      return $(true, c1 != c2);
     case Absyn::Bitand:
-      return c1 & c2;
+      return $(true, c1 & c2);
     case Absyn::Bitor:
-      return c1 | c2;
+      return $(true, c1 | c2);
     case Absyn::Bitxor:
-      return c1 ^ c2;
+      return $(true, c1 ^ c2);
     case Absyn::Bitlshift:
-      return c1 << c2;
+      if (c2 >= 32) return $(false, 0);
+      return $(true, c1 << c2);
     case Absyn::Bitlrshift:
-      return c1 >> c2;
+      if (c2 >= 32) return $(false, 0);
+      return $(true, c1 >> c2);
     default:
       Warn::impos(aprintf("Invalid binop %s during constant evaluation", Absynpp::prim2string(p)));
   }
-  return 0;
+  return $(true, 0);
 }
 
 static unsigned eval_unop(Absyn::primop_t p, unsigned c) {
@@ -1234,7 +1239,7 @@ static $(bool, unsigned int) eq_node_const(node_t @`H n, node_t @`H z, bool is_s
   // dist_length_t -> int conversion should be safe here because a term's signed
   // value should be between [INT_MIN, INT_MAX] and a term's unsigned value should
   // be between [0,UINT_MAX] all of which could be presented by an unsigned int.
-  if (n2z != NULL && z2n != NULL && -(*z2n) == *n2z)
+  if (n2z != NULL && z2n != NULL && *z2n != MIN_DIST && -(*z2n) == *n2z)
     return $(true, (unsigned int)*n2z);
   return $(false, 0xBAD);
 }
@@ -1282,7 +1287,8 @@ static $(bool, unsigned, term_opt_t) subst_term_with_const(graph_t @g, term_t t)
         add_eq(g, t, newterm);
       }
       if (ok1 && ok2) {
-        return $(true, eval_binop(p, c1, c2), NULL);
+        let $(defined, value) = eval_binop(p, c1, c2);
+        if (defined) return $(true, value, NULL);
       }
       break;
     case &Unop(p, t1, topt):

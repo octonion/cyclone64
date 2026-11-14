@@ -1,0 +1,15 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static int check_stack(`a::B x,`a y) {
+  `a items[3]={x,y,x};
+  `a ?p=items;
+  if(sizeof(items)!=3*sizeof(`a) || numelts(p)!=3) return 1;
+  if(p[0]!=x || p[1]!=y || p[2]!=x) return 2;
+  p[1]=x;
+  return items[1]==x ? 0 : 3;
+}
+int main(int argc,string_t ?argv) {
+  int i=check_stack(11,-29);
+  if(i) return i;
+  return check_stack(0x1234567800000011L,0x4321876500000029L);
+}

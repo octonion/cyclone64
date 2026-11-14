@@ -1,0 +1,16 @@
+#include "cyclone/library/std/core.h"
+using Core;
+struct Packed {
+  <`a::B>
+  `a @p;
+  `a expected;
+};
+static int inspect(struct Packed @box) {
+  let Packed{<`a> p,expected}=*box;
+  return *p==expected && sizeof(`a)==4 ? 0 : 1;
+}
+static int value=-17;
+int main(int argc,string_t ?argv) {
+  struct Packed box={.p=&value,.expected=-17};
+  return inspect(&box);
+}

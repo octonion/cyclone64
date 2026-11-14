@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <limits.h>
+#include <stdarg.h>
 
 // libffi closures use mmap, outside LeakSanitizer's allocation graph. Each
 // cached closure is a live root and owns trampoline-table pointers in malloc
@@ -44,6 +45,8 @@ struct cb_adapter {
   void *original, *code;
   ffi_closure *closure;
   struct cb_type *from, *to;
+  size_t bound_count;
+  unsigned long *bound;
 };
 static struct cb_adapter *cb_cache;
 static pthread_mutex_t cb_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -190,7 +193,8 @@ static void cb_invoke(ffi_cif *cif,void *ret,void **args,void *data) {
   unsigned char *position=target_result+cb_slot_size(a->to->result);
   for(size_t i=0;i<a->from->count;++i) {
     values[i]=position;
-    cb_convert(a->to->parts[i],a->from->parts[i],args[i],position);
+    if(i<a->bound_count) memcpy(position,&a->bound[i],sizeof(unsigned long));
+    else cb_convert(a->to->parts[i-a->bound_count],a->from->parts[i],args[i-a->bound_count],position);
     position+=cb_slot_size(a->from->parts[i]);
   }
   ffi_call(&a->from->cif,FFI_FN(a->original),source_result,values);
@@ -204,16 +208,21 @@ static void cb_invoke(ffi_cif *cif,void *ret,void **args,void *data) {
   } else if(a->to->result->kind!='v') memcpy(ret,target_result,a->to->result->ffi->size);
   if(scratch!=local_scratch) GC_free(scratch);
 }
-static void *cb_adapt(void *fn,const char *from_text,const char *to_text) {
-  if (!fn || !strcmp(from_text,to_text)) return fn;
+static int cb_bound_equal(const struct cb_adapter *a,size_t n,const unsigned long *values) {
+  return a->bound_count==n && (!n || !memcmp(a->bound,values,n*sizeof *values));
+}
+static void *cb_adapt_bound(void *fn,const char *from_text,const char *to_text,
+                            size_t bound_count,const unsigned long *bound) {
+  if (!fn || (!bound_count && !strcmp(from_text,to_text))) return fn;
   pthread_mutex_lock(&cb_lock);
   // Flatten adapters and recover the original callable on a round trip.
-  for(struct cb_adapter *p=cb_cache;p;p=p->next) if(p->code==fn) {
-    fn=p->original; from_text=p->from->signature; break;
+  for(struct cb_adapter *p=cb_cache;p;p=p->next) if(!bound_count && p->code==fn) {
+    fn=p->original; from_text=p->from->signature;
+    bound_count=p->bound_count; bound=p->bound; break;
   }
-  if(!strcmp(from_text,to_text)) { pthread_mutex_unlock(&cb_lock); return fn; }
+  if(!bound_count && !strcmp(from_text,to_text)) { pthread_mutex_unlock(&cb_lock); return fn; }
   for(struct cb_adapter *p=cb_cache;p;p=p->next)
-    if(p->original==fn && !strcmp(p->from->signature,from_text) && !strcmp(p->to->signature,to_text)) {
+    if(p->original==fn && cb_bound_equal(p,bound_count,bound) && !strcmp(p->from->signature,from_text) && !strcmp(p->to->signature,to_text)) {
       pthread_mutex_unlock(&cb_lock); return p->code;
     }
   pthread_mutex_unlock(&cb_lock);
@@ -222,8 +231,12 @@ static void *cb_adapt(void *fn,const char *from_text,const char *to_text) {
   struct cb_adapter *a=cb_alloc(sizeof *a);
   const char *f=from_text,*t=to_text;
   a->from=cb_parse(&f); a->to=cb_parse(&t);
-  if(*f || *t || a->from->kind!='F' || a->to->kind!='F' || a->from->count!=a->to->count)
+  if(*f || *t || a->from->kind!='F' || a->to->kind!='F' || a->from->count!=a->to->count+bound_count)
     cb_error("incompatible callback signatures");
+  for(size_t i=0;i<bound_count;++i)
+    if(a->from->parts[i]->kind!='L') cb_error("bound layout parameter is not unsigned long");
+  a->bound_count=bound_count;
+  if(bound_count) { a->bound=cb_alloc(bound_count*sizeof *bound); memcpy(a->bound,bound,bound_count*sizeof *bound); }
   a->original=fn;
   a->closure=ffi_closure_alloc(sizeof *a->closure,&a->code);
   if(!a->closure || ffi_prep_closure_loc(a->closure,&a->to->cif,cb_invoke,a,a->code)!=FFI_OK)
@@ -231,28 +244,55 @@ static void *cb_adapt(void *fn,const char *from_text,const char *to_text) {
   if(__lsan_register_root_region) __lsan_register_root_region(a->closure,sizeof *a->closure);
   pthread_mutex_lock(&cb_lock);
   for(struct cb_adapter *p=cb_cache;p;p=p->next)
-    if(p->original==fn && !strcmp(p->from->signature,from_text) && !strcmp(p->to->signature,to_text)) {
+    if(p->original==fn && cb_bound_equal(p,bound_count,bound) && !strcmp(p->from->signature,from_text) && !strcmp(p->to->signature,to_text)) {
       void *code=p->code;
       pthread_mutex_unlock(&cb_lock);
       if(a->closure) cb_closure_free(a->closure);
-    cb_free_type(a->from); cb_free_type(a->to); GC_free(a);
+    cb_free_type(a->from); cb_free_type(a->to); GC_free(a->bound); GC_free(a);
       return code;
     }
   a->next=cb_cache; cb_cache=a;
   pthread_mutex_unlock(&cb_lock);
   return a->code;
 }
+static void *cb_adapt(void *fn,const char *from,const char *to) {
+  return cb_adapt_bound(fn,from,to,0,NULL);
+}
 void *_cyc_callback_adapt(void *fn,const char *from,const char *to) { return cb_adapt(fn,from,to); }
-void _cyc_callback_register_static(void *wrapper,void *original,const char *from,const char *to) {
+void *_cyc_callback_bind(void *fn,const char *from,const char *to,unsigned n,...) {
+  if(n>1024) cb_error("too many bound layouts");
+  unsigned long values[n?n:1];
+  va_list ap; va_start(ap,n);
+  for(unsigned i=0;i<n;++i) values[i]=va_arg(ap,unsigned long);
+  va_end(ap);
+  return cb_adapt_bound(fn,from,to,n,values);
+}
+static void cb_register_static(void *wrapper,void *original,const char *from,const char *to,
+                               unsigned n,const unsigned long *values) {
   struct cb_adapter *a=cb_alloc(sizeof *a);
   const char *f=from,*t=to;
   a->from=cb_parse(&f); a->to=cb_parse(&t);
-  if(*f || *t || a->from->kind!='F' || a->to->kind!='F' || a->from->count!=a->to->count)
+  if(*f || *t || a->from->kind!='F' || a->to->kind!='F' || a->from->count!=a->to->count+n)
     cb_error("incompatible static callback signatures");
+  a->bound_count=n;
+  if(n) { a->bound=cb_alloc(n*sizeof *values); memcpy(a->bound,values,n*sizeof *values); }
+  for(unsigned i=0;i<n;++i)
+    if(a->from->parts[i]->kind!='L') cb_error("bound layout parameter is not unsigned long");
   a->original=original; a->code=wrapper;
   pthread_mutex_lock(&cb_lock);
   a->next=cb_cache; cb_cache=a;
   pthread_mutex_unlock(&cb_lock);
+}
+void _cyc_callback_register_static(void *wrapper,void *original,const char *from,const char *to) {
+  cb_register_static(wrapper,original,from,to,0,NULL);
+}
+void _cyc_callback_register_bound_static(void *wrapper,void *original,const char *from,const char *to,unsigned n,...) {
+  if(n>1024) cb_error("too many bound layouts");
+  unsigned long values[n?n:1];
+  va_list ap; va_start(ap,n);
+  for(unsigned i=0;i<n;++i) values[i]=va_arg(ap,unsigned long);
+  va_end(ap);
+  cb_register_static(wrapper,original,from,to,n,values);
 }
 // Equality is based on the original function, including independently emitted
 // static adapters in separate translation units. The cache lock keeps metadata
@@ -276,7 +316,7 @@ void _cyc_callback_shutdown(void) {
   while(cb_cache) {
     struct cb_adapter *a=cb_cache; cb_cache=a->next;
     if(a->closure) cb_closure_free(a->closure);
-    cb_free_type(a->from); cb_free_type(a->to); GC_free(a);
+    cb_free_type(a->from); cb_free_type(a->to); GC_free(a->bound); GC_free(a);
   }
   pthread_mutex_unlock(&cb_lock);
 }

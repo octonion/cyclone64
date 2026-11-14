@@ -85,6 +85,9 @@ namespace Toc {
     exp_opt_t aliasable_qual_exp_cache;
     exp_opt_t get_exn_thrown_exp_cache;
 
+    // Current generic function layout parameters, indexed by type identity.
+    list_t<$(int, exp_t) @> native_layout_params;
+
     // Globals list
     stringptr_t ? globals;
     // Reuse adapters so repeated conversions preserve callback identity.
@@ -122,9 +125,12 @@ namespace Toc {
 
   // this is just for other translation files
   qvar_t temp_var(toc_context_t);
+  exp_t native_layout_store(toc_context_t, exp_t, exp_t, exp_t);
+  exp_t native_layout_offset(toc_context_t, exp_t, exp_t, exp_t);
   // for passing New_e destinations to RemoveAggrs
   @extensible datatype Absyn::AbsynAnnot {
-    extern NewInfo(exp_t, type_t);
+    extern NewInfo(exp_t, type_t, exp_opt_t);
+  extern NativeArrayInit(exp_t);
   };
   
   toc_context_t Toc_Ctx_create();

@@ -14,3 +14,9 @@
 /ffi*/
 
 /scratch/
+
+/layout-gc/
+/layout-nogc-asan/
+/layout-unit/
+
+/layout-system-asan/

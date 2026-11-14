@@ -4,6 +4,7 @@ import argparse, concurrent.futures, json, os, pathlib, shlex, subprocess, sys
 from runtime_build import runtime_objects, compiler_libs
 p=argparse.ArgumentParser()
 p.add_argument('--jobs', type=int, default=4)
+p.add_argument('--compiler-flags', default='')
 p.add_argument('--cflags', default='-O2 -g')
 p.add_argument('--build',default='native/build')
 p.add_argument('--out',default='native/bootstrap/stage1')
@@ -25,7 +26,7 @@ def compile_source(src):
     dest=out/src.with_suffix('');dest.parent.mkdir(parents=True,exist_ok=True)
     pre=str(dest)+'.cyp'; gen=str(dest)+'.c'; obj=str(dest)+'.o'
     for artifact in (pre, gen, obj): pathlib.Path(artifact).unlink(missing_ok=True)
-    steps=[('preprocess',[a.cc,'-E','-x','c','-nostdinc','-Inative/generated','-Inative/include','-Inative/compat','-isystem','native/generated/libc',str(src),'-o',pre]),('translate',[compiler,'--cifc-inst-tvar','--better-widen','-o',gen,pre]),('compile',[a.cc,'-std=gnu11','-march=native','-fno-strict-aliasing',*shlex.split(a.cflags),'-Wno-error=incompatible-pointer-types','-Ilibrary/std/cyc-lib','-c',gen,'-o',obj])]
+    steps=[('preprocess',[a.cc,'-E','-x','c','-nostdinc','-Inative/generated','-Inative/include','-Inative/compat','-isystem','native/generated/libc',str(src),'-o',pre]),('translate',[compiler,*shlex.split(a.compiler_flags),'--cifc-inst-tvar','--better-widen','-o',gen,pre]),('compile',[a.cc,'-std=gnu11','-march=native','-fno-strict-aliasing',*shlex.split(a.cflags),'-Wno-error=incompatible-pointer-types','-Ilibrary/std/cyc-lib','-c',gen,'-o',obj])]
     for phase,cmd in steps:
         if not run(cmd,str(dest)+'-'+phase+'.log') or not pathlib.Path({'preprocess':pre,'translate':gen,'compile':obj}[phase]).is_file():
             result=f'{src}: {phase} FAIL';break

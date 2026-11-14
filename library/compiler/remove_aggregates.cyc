@@ -71,9 +71,10 @@ static enum ExpContext {
 static struct Env {  // a tagged union or datatype may be better
   enum ExpContext ctxt;
   exp_opt_t dest;  // where to assign the result (often NULL)
+  exp_opt_t native_width; // packed generic destination: dest is an address
 };
 typedef struct Env env_t;
-static env_t other_env = {Other, NULL};
+static env_t other_env = {Other, NULL, NULL};
 
 static env_t no_init(env_t env) { return env.ctxt == Initializer ? other_env : env; }
 
@@ -126,10 +127,10 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
 
     case &New_e(_, e1, _):
       switch (e->annot) {
-        case &Toc::NewInfo(mexp, typ):
+        case &Toc::NewInfo(mexp, typ, width):
           // for less output, try to special case initializers: t x = new e;
           if (env.ctxt == Initializer && can_use_initializer((exp_t)env.dest, typ)) {
-            remove_aggrs_exp(ctxt, Env(NewDest, env.dest), e1);
+            remove_aggrs_exp(ctxt, Env(NewDest, env.dest, width), e1);
             e->r = seq_exp(set_type(assign_exp((exp_t)env.dest, mexp, DL), (type_t)env.dest->topt),
                            e1, DL)
                        ->r;
@@ -139,7 +140,7 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
           }
           let xvar = Toc::temp_var(ctxt);
           let xexp = set_type(var_exp(xvar, DL), typ);
-          remove_aggrs_exp(ctxt, Env(NewDest, xexp), e1);
+          remove_aggrs_exp(ctxt, Env(NewDest, xexp, width), e1);
           let body_exp = xexp;
           if (e->topt != NULL)
             body_exp =
@@ -174,7 +175,7 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
         let &$(ds, field_exp) = dles2->hd;
         let f                 = designatorlist_to_fieldname(ds);
         let field_dest = set_type(member_exp(deep_copy(dest), f, DL), (type_t)field_exp->topt);
-        remove_aggrs_exp(ctxt, Env(AggrField, field_dest), field_exp);
+        remove_aggrs_exp(ctxt, Env(AggrField, field_dest, NULL), field_exp);
       }
       // note: we must preserve left-to-right since we're linearizing here
       if (dles == NULL) {
@@ -233,7 +234,10 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
         let fielddest =
             set_type(subscript_exp(deep_copy(dest), set_type(signed_int_exp(i, DL), sint_type), DL),
                      dest_type);
-        remove_aggrs_exp(ctxt, Env(AggrField, fielddest), field_exp);
+        if (env.native_width != NULL)
+          fielddest = Toc::native_layout_offset(ctxt, deep_copy(dest), (exp_t)env.native_width,
+                                                 set_type(uint_exp(i, DL), uint_type));
+        remove_aggrs_exp(ctxt, Env(AggrField, fielddest, env.native_width), field_exp);
       }
       exp_t init_e = (*dles->hd)[1];
       for (dles = dles->tl; dles != NULL; dles = dles->tl) {
@@ -273,7 +277,10 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
       }
       exp_t lval = subscript_exp((exp_t)env.dest, set_type(var_exp(i, DL), uint_type), DL);
       set_type(lval, dest_type);
-      remove_aggrs_exp(ctxt, Env(AggrField, deep_copy(lval)), body);
+      if (env.native_width != NULL)
+        lval = Toc::native_layout_offset(ctxt, deep_copy((exp_t)env.dest), (exp_t)env.native_width,
+                                          set_type(var_exp(i, DL), uint_type));
+      remove_aggrs_exp(ctxt, Env(AggrField, deep_copy(lval), env.native_width), body);
       stmt_t s = for_stmt(ea, eb, ec, exp_stmt(body, DL), DL);
       if (zero_term) {
         // used to be in toc.cyc; has nothing to do with aggregate removal
@@ -285,6 +292,11 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
         exp_t ex = assign_exp(
             subscript_exp(deep_copy((exp_t)env.dest), set_type(var_exp(max, DL), sint_type), DL),
             set_type(signed_int_exp(0, DL), sint_type), DL);
+        if (env.native_width != NULL)
+          ex = Toc::native_layout_store(ctxt,
+              Toc::native_layout_offset(ctxt, deep_copy((exp_t)env.dest), (exp_t)env.native_width,
+                                         set_type(var_exp(max, DL), uint_type)),
+              (exp_t)env.native_width, set_type(uint_exp(0, DL), uint_type));
         s = seq_stmt(s, exp_stmt(ex, DL), DL);
       }
       // Note the generated code for an initializer is a bit uglier than
@@ -324,7 +336,7 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
       did_assign = true;  // b/c we pass env for e2 and e3
       noarray_remove_aggrs_exp(ctxt, other_env, e1);
       noarray_remove_aggrs_exp(ctxt, no_init(env), e2);
-      let env3 = Env(env.ctxt, (env.dest == NULL ? NULL : deep_copy(env.dest)));
+      let env3 = Env(env.ctxt, (env.dest == NULL ? NULL : deep_copy(env.dest)), env.native_width);
       noarray_remove_aggrs_exp(ctxt, no_init(env3), e3);  // avoid sharing dest!
       break;
 
@@ -374,6 +386,10 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
     default:
       Warn::impos2("bad exp after translation to C: ", e);
   }
+  if ((env.ctxt == AggrField || env.ctxt == NewDest) && !did_assign && env.native_width != NULL) {
+    e->r = Toc::native_layout_store(ctxt, (exp_t)env.dest, (exp_t)env.native_width, deep_copy(e))->r;
+    did_assign = true;
+  }
   if (env.ctxt == AggrField && !did_assign)
     e->r = assign_exp((exp_t)env.dest, deep_copy(e), DL)->r;
   if (env.ctxt == NewDest && !did_assign) {
@@ -409,7 +425,12 @@ static bool remove_aggrs_stmt_f2(Toc::toc_context_t ctxt, stmt_t s) {
           if (vd->initializer != NULL) {
             let var_exp   = varb_exp(new Local_b(vd), DL);
             var_exp->topt = vd->type;
-            let Result(r) = remove_aggrs_exp(ctxt, Env(Initializer, var_exp), (exp_t)vd->initializer);
+            exp_opt_t width = NULL;
+            switch (vd->initializer->annot) {
+              case &Toc::NativeArrayInit(w): width = w; break;
+              default: break;
+            }
+            let Result(r) = remove_aggrs_exp(ctxt, Env(Initializer, var_exp, width), (exp_t)vd->initializer);
             if (r == WasArray || r == UsedInitializer) {
               s->r = decl_stmt(d, seq_stmt(exp_stmt((exp_t)vd->initializer, DL), s2, DL), DL)->r;
               vd->initializer = NULL;

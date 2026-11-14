@@ -8,8 +8,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* The native generic convention adds boxed-type layout parameters. Runtime
+   functions implemented in C expose a separate entry point for that ABI. */
+#ifdef CYC_NATIVE_LAYOUTS
+#define Cyc_Core_open_region _cyc_layout_open_region
+#endif
+
 /* Native callable adapters keep their metadata and executable closure alive. */
 void *_cyc_callback_adapt(void *, const char *, const char *);
+void *_cyc_callback_bind(void *, const char *, const char *, unsigned, ...);
+void _cyc_callback_register_bound_static(void *, void *, const char *, const char *, unsigned, ...);
 int _cyc_callback_equal(void *, void *);
 void _cyc_callback_register_static(void *, void *, const char *, const char *);
 
@@ -448,4 +456,23 @@ void _profile_free_region(struct _RegionHandle *, const char *, const char *, in
 #define _cyccalloc(n, s) _profile_GC_calloc(n, s, __FILE__, __FUNCTION__, __LINE__)
 #define _cyccalloc_atomic(n, s) _profile_GC_calloc_atomic(n, s, __FILE__, __FUNCTION__, __LINE__)
 #endif  // CYC_REGION_PROFILE
+
+/* Experimental boxed-reference layout ABI. Never read/write a whole word
+   when the caller supplied a four-byte C object. memcpy also permits unaligned
+   addresses and avoids effective-type aliasing violations. */
+static inline void *_cyc_layout_load(const void *p, unsigned long width) {
+  uintptr_t value = 0;
+  if (width == 4) { uint32_t v; __builtin_memcpy(&v,p,4); value=v; }
+  else if (width == 8) { uint64_t v; __builtin_memcpy(&v,p,8); value=v; }
+  else return _throw_arraybounds();
+  return (void *)value;
+}
+static inline void *_cyc_layout_store(void *p, unsigned long width, void *value) {
+  uintptr_t v=(uintptr_t)value;
+  if (width == 4) { uint32_t w=(uint32_t)v; __builtin_memcpy(p,&w,4); }
+  else if (width == 8) { uint64_t w=v; __builtin_memcpy(p,&w,8); }
+  else return _throw_arraybounds();
+  return value;
+}
+
 #endif  //_CYC_INCLUDE_H

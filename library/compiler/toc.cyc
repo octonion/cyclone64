@@ -64,7 +64,8 @@ namespace Toc;
 
 // for passing New_e destinations to RemoveAggrs
 @extensible datatype Absyn::AbsynAnnot {
-  NewInfo(exp_t, type_t);
+  NewInfo(exp_t, type_t, exp_opt_t);
+  NativeArrayInit(exp_t);
 };
 
 static `a unimp(string_t<`H> str) __attribute__((noreturn)) { Warn::impos2(str); }
@@ -205,6 +206,10 @@ MAKE_VAR(_get_zero_arr_size_other);
 MAKE_VAR(_fat_ptr_plus);
 MAKE_VAR(_fat_ptr_minus);
 MAKE_VAR(_fat_ptr_diff);
+MAKE_VAR(_cyc_callback_bind);
+MAKE_VAR(_cyc_callback_register_bound_static);
+MAKE_VAR(_cyc_layout_load);
+MAKE_VAR(_cyc_layout_store);
 MAKE_VAR(_cyc_callback_adapt);
 MAKE_VAR(_cyc_callback_equal);
 MAKE_VAR(_cyc_callback_register_static);
@@ -737,6 +742,73 @@ static bool tuple_word_field(type_t t) {
   return sizeof(void *) > sizeof(int) && is_boxed(t);
 }
 
+// Native references retain their C address. A boxed value still occupies one
+// canonical register word, while a reference uses the instantiated memory width.
+static bool native_layout_type(type_t t) {
+  if (!Flags::native_layouts) return false;
+  switch (compress(t)) {
+    case &VarType(tv): return Kinds::tvar_kind(tv, &Kinds::bk)->kind == BoxKind;
+    default: return false;
+  }
+}
+static var_t native_layout_name(int i) {
+  return new (string_t) aprintf("_cyc_layout_%d", i);
+}
+static list_t<$(var_opt_t, tqual_t, type_t) @> native_layout_args(list_t<tvar_t> tvs) {
+  list_t<$(var_opt_t, tqual_t, type_t) @> args = NULL;
+  if (!Flags::native_layouts) return args;
+  int i = 0;
+  for (; tvs != NULL; tvs = tvs->tl)
+    if (Kinds::tvar_kind(tvs->hd, &Kinds::bk)->kind == BoxKind)
+      args = new List(new $(native_layout_name(i++), mt_tq, ulong_type), args);
+  return imp_rev(args);
+}
+static exp_t native_layout_size(toc_context_t ctxt, type_t t) {
+  if (native_layout_type(t)) {
+    let &VarType(tv) = compress(t);
+    for (let ps = ctxt->native_layout_params; ps != NULL; ps = ps->tl)
+      if ((*ps->hd)[0] == tv->identity) return deep_copy((*ps->hd)[1]);
+    // Existential layouts are not reified yet. An explicit zero is rejected by
+    // the runtime if used, rather than silently assuming pointer-width storage.
+    return set_type(uint_exp(0, DL), ulong_type);
+  }
+  if (Flags::native_layouts) switch (compress(t)) {
+    case &ArrayType(ai):
+      if (native_layout_type(ai.elt_type) && ai.num_elts != NULL)
+        return set_type(times_exp(native_layout_size(ctxt, ai.elt_type),
+                                  deep_copy((exp_t)ai.num_elts), DL), ulong_type);
+      break;
+    default: break;
+  }
+  return set_type(sizeoftype_exp(typ_to_c(ctxt, t), DL), ulong_type);
+}
+exp_t native_layout_store(toc_context_t ctxt, exp_t address, exp_t width, exp_t value) {
+  let vp = void_star_type(ctxt);
+  return set_type(fncall_exp_dl(_cyc_layout_store_e, cast_it(vp, address),
+                                 deep_copy(width), cast_it(vp, value)), vp);
+}
+exp_t native_layout_offset(toc_context_t ctxt, exp_t address, exp_t width, exp_t index) {
+  let cp = cstar_type(uchar_type, mt_tq);
+  let offset = set_type(times_exp(deep_copy(width), index, DL), ulong_type);
+  return set_type(add_exp(cast_it(cp, address), offset, DL), cp);
+}
+
+static list_t<exp_t> native_layout_actuals(toc_context_t ctxt, exp_t raw, list_t<type_t> ts) {
+  list_t<exp_t> args = NULL;
+  if (!Flags::native_layouts) return args;
+  type_t ft = compress((type_t)raw->topt);
+  if (is_pointer_type(ft)) ft = compress(pointer_elt_type(ft));
+  switch (ft) {
+    case &FnType(fi):
+      for (let tvs = fi.tvars; tvs != NULL && ts != NULL; tvs = tvs->tl, ts = ts->tl)
+        if (Kinds::tvar_kind(tvs->hd, &Kinds::bk)->kind == BoxKind)
+          args = new List(native_layout_size(ctxt, ts->hd), args);
+      break;
+    default: toc_impos("layout arguments require a function");
+  }
+  return imp_rev(args);
+}
+
 static type_t trans_type(toc_context_t ctxt, type_t t) {
   switch (t) {
     case &AppType(&VoidCon, _):
@@ -769,11 +841,11 @@ static type_t trans_type(toc_context_t ctxt, type_t t) {
       return t;
     case &ArrayType(ArrayInfo{t2, tq, e, _, ztl}):
       return array_type(trans_type(ctxt, t2), tq, e, false_type, ztl);
-    case &FnType(FnInfo{_, _, tq2, t2, args, c_vararg, cyc_vararg, _, atts, ...}):
+    case &FnType(FnInfo{tvars, _, tq2, t2, args, c_vararg, cyc_vararg, _, atts, ...}):
       // just drop the type arguments & effect and translate the nested types
       // also, drop any format descriptors
       let new_atts = Atts::atts2c(atts);
-      let new_args = List::map_c(arg_to_c, ctxt, args);
+      let new_args = append(native_layout_args(tvars), List::map_c(arg_to_c, ctxt, args));
       if (cyc_vararg != NULL) {
         // region for array type irrelevant
         let t      = trans_type(ctxt, fatptr_type(cyc_vararg->type, heap_rgn_type, al_qual_type, mt_tq,
@@ -1153,7 +1225,7 @@ static exp_opt_t callback_runtime_conversion(toc_context_t, type_t, exp_t);
 // emit a real function with the requested signature and convert at its call
 // boundary. Static initializers need constant function addresses; constructors
 // register their original identity with the runtime ABI bridge.
-static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value) {
+static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value, list_t<exp_t,`H> bound) {
   while (true) {
     switch (value->r) {
       case &Cast_e(_, inner, _, _): value = inner; continue;
@@ -1183,7 +1255,7 @@ static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value
       if (Tcutil::typecmp(from, to) == 0) return value;
       if (actual.c_varargs || wanted.c_varargs || actual.cyc_varargs != NULL ||
           wanted.cyc_varargs != NULL) return NULL;
-      for (let cache = ctxt->callback_adapters; cache != NULL; cache = cache->tl) {
+      for (let cache = ctxt->callback_adapters; bound == NULL && cache != NULL; cache = cache->tl) {
         let &$(name, ty, expression) = cache->hd;
         if (qvar_cmp(name, source_name) == 0 && Tcutil::typecmp(ty, to) == 0)
           return deep_copy(expression);
@@ -1193,6 +1265,10 @@ static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value
       list_t<vardecl_opt_t> optional_variables = NULL;
       list_t<exp_t> args = NULL;
       let a = actual.args;
+      for (let bs = bound; bs != NULL; bs = bs->tl) {
+        if (a == NULL) return NULL;
+        a = a->tl;
+      }
       for (let w = wanted.args; w != NULL; w = w->tl) {
         if (a == NULL) return NULL;
         let q = new $(Loc_n(), new (string_t) aprintf("_cyc_arg%X", ctxt->temp_var_counter++));
@@ -1211,7 +1287,7 @@ static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value
       }
       if (a != NULL || (is_void_type(actual.ret_type) && !is_void_type(wanted.ret_type)))
         return NULL;
-      let call = set_type(fncall_exp(deep_copy(value), imp_rev(args), DL), actual.ret_type);
+      let call = set_type(fncall_exp(deep_copy(value), append(bound, imp_rev(args)), DL), actual.ret_type);
       stmt_t body;
       if (is_void_type(wanted.ret_type)) body = exp_stmt(call, DL);
       else {
@@ -1232,7 +1308,7 @@ static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value
       ctxt->result_decls = new List(new_decl(new Var_d(prototype), DL), ctxt->result_decls);
       ctxt->result_decls = new List(new_decl(new Fn_d(fd), DL), ctxt->result_decls);
       let result = set_type(varb_exp(new Funname_b(fd), DL), target);
-      ctxt->callback_adapters = new List(new $(source_name, to, result), ctxt->callback_adapters);
+      if (bound == NULL) ctxt->callback_adapters = new List(new $(source_name, to, result), ctxt->callback_adapters);
       let original_sig = callback_signature(ctxt, from);
       let adapter_sig = callback_signature(ctxt, to);
       if (strlen(original_sig) == 0 || strlen(adapter_sig) == 0) {
@@ -1247,9 +1323,15 @@ static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value
       let init_name = new $(Nmspace{.C_n = NULL},
                            new (string_t) aprintf("_cyc_callback_init%X", ctxt->temp_var_counter++));
       let p = void_star_type(ctxt);
-      let register_call = set_type(fncall_exp_dl(_cyc_callback_register_static_e,
-            cast_it(p, deep_copy(result)), cast_it(p, deep_copy(value)),
-            string_exp(original_sig, DL), string_exp(adapter_sig, DL)), void_type);
+      let register_args = list(cast_it(p, deep_copy(result)), cast_it(p, deep_copy(value)),
+                               string_exp(original_sig, DL), string_exp(adapter_sig, DL));
+      let register_fn = _cyc_callback_register_static_e;
+      if (bound != NULL) {
+        register_fn = _cyc_callback_register_bound_static_e;
+        register_args = append(register_args,
+            new List(set_type(uint_exp(length(bound), DL), uint_type), bound));
+      }
+      let register_call = set_type(fncall_exp(register_fn, register_args, DL), void_type);
       let init_fd = new Fndecl{.sc = Static, .is_inline = false, .name = init_name,
           .body = exp_stmt(register_call, DL), .i = init_info, .cached_type = new FnType(init_info),
           .param_vardecls = new Core::Opt(NULL), .fn_vardecl = NULL, .orig_scope = Static,
@@ -1341,8 +1423,25 @@ static exp_opt_t callback_runtime_conversion(toc_context_t ctxt, type_t target, 
 
 static exp_opt_t callback_conversion(env_t nv, type_t target, exp_t value) {
   if (in_lhs(nv)) return value;
-  if (is_toplevel(nv)) return callback_adapter(nv->ctxt, target, value);
+  if (is_toplevel(nv)) return callback_adapter(nv->ctxt, target, value, NULL);
   return callback_runtime_conversion(nv->ctxt, target, value);
+}
+
+static exp_t native_layout_bind(env_t nv, type_t target, exp_t value, list_t<exp_t,`H> bound) {
+  if (is_toplevel(nv)) {
+    let adapted = callback_adapter(nv->ctxt, target, value, bound);
+    if (adapted != NULL) return (exp_t)adapted;
+    Warn::err2(value->loc, "unsupported static generic layout binding");
+    return cast_it(target, value);
+  }
+  let from = callback_signature(nv->ctxt, (type_t)value->topt);
+  let to = callback_signature(nv->ctxt, target);
+  if (strlen(from) == 0 || strlen(to) == 0)
+    Warn::err2(value->loc, "unsupported generic layout binding signature");
+  let p = void_star_type(nv->ctxt);
+  let args = append(list(cast_it(p, value), string_exp(from, DL), string_exp(to, DL),
+                        set_type(uint_exp(length(bound), DL), uint_type)), bound);
+  return cast_it(target, set_type(fncall_exp(_cyc_callback_bind_e, args, DL), p));
 }
 
 static type_t callback_field_type(toc_context_t ctxt, type_t aggregate, field_name_t name) {
@@ -1416,6 +1515,19 @@ static enum PTR_ANS ptr_use_to_c(env_t nv, exp_t ptr, absyn_annot_t annot, exp_o
     exp_to_c(nv, index);
   switch (old_typ) {
     case &PointerType(PtrInfo{ta, tq, PtrAtts(_, _, b, zt, ...)}):
+      if (native_layout_type(ta)) {
+        let bd = get_bounds_exp_constrain(bounds_one(), b, true);
+        let width = native_layout_size(nv->ctxt, ta);
+        let ind = index ? index : set_type(uint_exp(0, DL), uint_type);
+        let call = bd == NULL
+          ? fncall_exp_dl(_check_fat_subscript_e, deep_copy(ptr), width, ind)
+          : fncall_exp_dl(_check_known_subscript_null_e, deep_copy(ptr), (exp_t)bd, width, ind);
+        ptr->r = cast_it_r(cstar_type(void_star_type(nv->ctxt), tq),
+                          set_type(call, cstar_type(uchar_type, mt_tq)));
+        ptr->topt = cstar_type(void_star_type(nv->ctxt), tq);
+        set_lhs(nv, old_lhs);
+        return DIRECT_DEREF;
+      }
       switch (annot) {
         case &InsertChecks::NoCheck:
           if (!get_bounds_exp_constrain(bounds_one(), b, true)) {
@@ -1524,6 +1636,19 @@ static enum PTR_ANS ptr_use_to_c(env_t nv, exp_t ptr, absyn_annot_t annot, exp_o
       return ans;
     default:
       toc_impos("ptr_use_to_c: non-pointer-type");
+  }
+}
+
+static exp_opt_t native_reference_address(env_t nv, exp_t e) {
+  if (!native_layout_type((type_t)e->topt)) return NULL;
+  switch (e->r) {
+    case &Deref_e(p):
+      ptr_use_to_c(nv, p, e->annot, NULL);
+      return p;
+    case &Subscript_e(p, i):
+      ptr_use_to_c(nv, p, e->annot, i);
+      return p;
+    default: return NULL;
   }
 }
 
@@ -1793,7 +1918,7 @@ static void zero_ptr_assign_to_c(env_t nv, exp_t e, exp_t e1, primop_opt_t popt,
       }
       exp_to_c(nv, ea);
       exp_to_c(nv, eb);
-      xinit       = fncall_exp_dl(_fat_ptr_plus_e, ea, sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL), eb);
+      xinit       = fncall_exp_dl(_fat_ptr_plus_e, ea, native_layout_size(nv->ctxt, elt_type), eb);
       xinit->topt = c_fat_ptr_type;
       break;
     default:
@@ -1850,7 +1975,7 @@ static void zero_ptr_assign_to_c(env_t nv, exp_t e, exp_t e1, primop_opt_t popt,
     exp_to_c(nv, comp2_exp);
     // build numelts(x) == 1 directly (no translation)
     let xsizeargs =
-        list(set_type(varb_exp(x_bnd, DL), c_fat_ptr_type), sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL));
+        list(set_type(varb_exp(x_bnd, DL), c_fat_ptr_type), native_layout_size(nv->ctxt, elt_type));
     let oneexp = set_type(uint_exp(1, DL), uint_type);
     exp_t xsize;
     xsize =
@@ -2072,14 +2197,14 @@ void exp_to_c(env_t nv, exp_t e) {
               if (eopt == NULL)
                 // retrieve (last_plus_one - curr) via runtime call
                 e->r =
-                    fncall_exp_r(_get_fat_size_e, es->hd, sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL));
+                    fncall_exp_r(_get_fat_size_e, es->hd, native_layout_size(nv->ctxt, elt_type));
               else if (force_type2bool(false, zt)) {
                 // when zero-terminated, we have to call "strlen"
                 if (isCharStar(es->hd))
                   e->r = fncall_exp_r(_get_zero_arr_size_char_e, es->hd, eopt);
                 else
                   e->r = fncall_exp_r(_get_zero_arr_size_other_e,
-                                      sizeoftype_exp(typ_to_c(nv->ctxt, pointer_elt_type(old_types->hd)), DL),
+                                      native_layout_size(nv->ctxt, pointer_elt_type(old_types->hd)),
                                       es->hd, eopt);
               } else if (force_type2bool(false, nbl)) {
                 if (!Evexp::c_can_eval(eopt))
@@ -2106,13 +2231,13 @@ void exp_to_c(env_t nv, exp_t e) {
               exp_t e2 = es->tl->hd;
               if (eopt == NULL)
                 e->r =
-                    fncall_exp_r(_fat_ptr_plus_e, e1, sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL), e2);
+                    fncall_exp_r(_fat_ptr_plus_e, e1, native_layout_size(nv->ctxt, elt_type), e2);
               else if (force_type2bool(false, zt)) {
                 if (isCharStar(e1))
                   e->r = fncall_exp_r(_zero_arr_plus_char_e, e1, eopt, e2);
                 else
                   e->r = fncall_exp_r(_zero_arr_plus_other_e,
-                                      sizeoftype_exp(typ_to_c(nv->ctxt, pointer_elt_type(old_types->hd)), DL),
+                                      native_layout_size(nv->ctxt, pointer_elt_type(old_types->hd)),
                                       eopt, e2);
               }
               break;
@@ -2130,10 +2255,10 @@ void exp_to_c(env_t nv, exp_t e) {
             exp_t e2 = es->tl->hd;
             if (is_fat_pointer_type(old_types->tl->hd))
               e->r = fncall_exp_r(_fat_ptr_diff_e, e1, e2,
-                                  sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL));
+                                  native_layout_size(nv->ctxt, elt_type));
             else
               e->r = fncall_exp_r(_fat_ptr_minus_e, e1,
-                                  sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL), e2);
+                                  native_layout_size(nv->ctxt, elt_type), e2);
           }
           break;
         case Eq:
@@ -2233,7 +2358,7 @@ void exp_to_c(env_t nv, exp_t e) {
                                                         : _fat_ptr_inplace_plus_e;
         if (incr == PreDec || incr == PostDec)
           change = -1;
-        e->r = fncall_exp_r(fn_e, push_address_exp(e2), sizeoftype_exp(typ_to_c(nv->ctxt, elt_typ), DL),
+        e->r = fncall_exp_r(fn_e, push_address_exp(e2), native_layout_size(nv->ctxt, elt_typ),
                             set_type(signed_int_exp(change, DL), sint_type));
       } else if (is_zero_pointer_type_elt(old_typ, &elt_typ)) {
         // we treat ++x specially -- this becomes
@@ -2278,6 +2403,15 @@ void exp_to_c(env_t nv, exp_t e) {
       }
       break;
     case &AssignOp_e(e1, popt, e2):
+      let native_address = native_reference_address(nv, e1);
+      if (native_address != NULL) {
+        if (popt != NULL) toc_impos("compound assignment on abstract boxed reference");
+        let width = native_layout_size(nv->ctxt, (type_t)e1->topt);
+        exp_to_c(nv, e2);
+        e->r = fncall_exp_dl(_cyc_layout_store_e, (exp_t)native_address, width, e2)->r;
+        did_inserted_checks = true;
+        break;
+      }
       // FIX: not sure all these special-cases work right *together*...
       //
       // We need to know whether or not the expression is of the form
@@ -2340,7 +2474,7 @@ void exp_to_c(env_t nv, exp_t e) {
           }
           done = true;
           e->r = fncall_exp_r(fn_e, push_address_exp(e1),
-                              sizeoftype_exp(typ_to_c(nv->ctxt, elt_typ), DL), e2);
+                              native_layout_size(nv->ctxt, elt_typ), e2);
         } else if (is_zero_pointer_type_elt(old_typ, &elt_typ))
           // We're doing x += e where x is a zero-terminated pointer.
           // Make sure we don't run off the end.
@@ -2405,8 +2539,11 @@ void exp_to_c(env_t nv, exp_t e) {
       // prototype is not C ABI adaptation. Call its actual erased prototype,
       // convert the arguments, and convert the result instead.
       exp_opt_t erased = NULL;
+      list_t<exp_t> layout_args = NULL;
       switch (e1->r) {
-        case &Instantiate_e(raw, _): erased = raw; break;
+        case &Instantiate_e(raw, ts):
+          layout_args = native_layout_actuals(nv->ctxt, raw, ts);
+          erased = raw; break;
         default: break;
       }
       if (erased != NULL) {
@@ -2417,6 +2554,7 @@ void exp_to_c(env_t nv, exp_t e) {
         switch (ft) {
           case &FnType(fi):
             let formals = fi.args;
+            for (let ls = layout_args; ls != NULL; ls = ls->tl) formals = formals->tl;
             for (let actuals = es; actuals != NULL; actuals = actuals->tl) {
               let arg = actuals->hd;
               exp_to_c(nv, arg);
@@ -2432,7 +2570,7 @@ void exp_to_c(env_t nv, exp_t e) {
             did_inserted_checks = true;
             if (do_null_check(e))
               callee->r = fncall_exp_dl(_check_null_e, deep_copy(callee))->r;
-            let call = set_type(fncall_exp(callee, es, DL), fi.ret_type);
+            let call = set_type(fncall_exp(callee, append(layout_args, es), DL), fi.ret_type);
             let adapter = callback_conversion(nv, new_typ, call);
             e->r = adapter != NULL ? adapter->r :
                 Tcutil::typecmp(fi.ret_type, new_typ) == 0 ? call->r : cast_it_r(new_typ, call);
@@ -2576,7 +2714,12 @@ void exp_to_c(env_t nv, exp_t e) {
       *e = *e1;
       break;
     case &Instantiate_e(e1, ts):
+      let bound = native_layout_actuals(nv->ctxt, e1, ts);
       exp_to_c(nv, e1);
+      if (bound != NULL) {
+        e->r = native_layout_bind(nv, new_typ, e1, bound)->r;
+        break;
+      }
       // only cast when the instantiation has type variables,
       // you can cast other times, but you'll spit out much more C code.
       // Note: we don't bother to cast if type is void * anyway (b/c that's
@@ -2688,7 +2831,7 @@ void exp_to_c(env_t nv, exp_t e) {
                     else
                       arg3 = fncall_exp_dl(
                           _get_zero_arr_size_other_e,
-                          set_type(sizeoftype_exp(pointer_elt_type(typ_to_c(nv->ctxt, old_t2)), DL),
+                          set_type(native_layout_size(nv->ctxt, pointer_elt_type(old_t2)),
                                    uint_type),
                           x_exp, e2);
                     arg3->topt = uint_type;
@@ -2700,7 +2843,7 @@ void exp_to_c(env_t nv, exp_t e) {
                 if (!zt2 && !p2.elt_tq.real_const)
                   arg3 = set_type(prim2_exp(Minus, arg3, set_type(uint_exp(1, DL), uint_type), DL),
                                   (type_t)arg3->topt);
-                let arg2 = set_type(sizeoftype_exp(typ_to_c(nv->ctxt, p1.elt_type), DL), uint_type);
+                let arg2 = set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type);
                 if (use_temp) {
                   let tg_exp   = fncall_exp_dl(_tag_fat_e, x_exp, arg2, arg3);
                   tg_exp->topt = fat_ptr_type(nv->ctxt);
@@ -2712,7 +2855,7 @@ void exp_to_c(env_t nv, exp_t e) {
               } else
                 // build the t ? struct
                 e->r = fncall_exp_r(_tag_fat_e, e1,
-                                    set_type(sizeoftype_exp(typ_to_c(nv->ctxt, p1.elt_type), DL), uint_type),
+                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type),
                                     e2);
               break;
             case $(NULL,
@@ -2750,14 +2893,14 @@ void exp_to_c(env_t nv, exp_t e) {
                   // for t@: _check_null(_untag_arr(e1, sizeof(t), new_e2))
                   ptr_exp = set_type(
                       fncall_exp_dl(_untag_fat_ptr_check_bound_e, ptr_exp,
-                                    set_type(sizeoftype_exp(typ_to_c(nv->ctxt, p1.elt_type), DL), uint_type),
+                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type),
                                     new_e2),
                       cstar_type(uchar_type, mt_tq));
                   break;
                 default:
                   ptr_exp = set_type(
                       fncall_exp_dl(_untag_fat_ptr_e, ptr_exp,
-                                    set_type(sizeoftype_exp(typ_to_c(nv->ctxt, p1.elt_type), DL), uint_type),
+                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type),
                                     new_e2),
                       cstar_type(uchar_type, mt_tq));
                   break;
@@ -2776,7 +2919,7 @@ void exp_to_c(env_t nv, exp_t e) {
                       "can't coerce a ZEROTERM to a non-const NOZEROTERM "
                       "pointer at toplevel");
                 e->r = fncall_exp_r(_fat_ptr_decrease_size_e, e1,
-                                    set_type(sizeoftype_exp(typ_to_c(nv->ctxt, p1.elt_type), DL), uint_type),
+                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type),
                                     set_type(uint_exp(1, DL), uint_type));
               }
               break;
@@ -2800,6 +2943,12 @@ void exp_to_c(env_t nv, exp_t e) {
       break;
 
     case &Address_e(e1):  // FIX: support & e as malloc-and-initialize?
+      let native_address = native_reference_address(nv, e1);
+      if (native_address != NULL) {
+        e->r = cast_it_r(new_typ, (exp_t)native_address);
+        did_inserted_checks = true;
+        break;
+      }
       set_lhs(nv, true);
       exp_to_c(nv, e1);
       set_lhs(nv, false);
@@ -2813,6 +2962,9 @@ void exp_to_c(env_t nv, exp_t e) {
       break;
 
     case &New_e(rgnopt, e1, qual):  // ignore qual for now
+      exp_opt_t native_width = NULL;
+      if (native_layout_type(pointer_elt_type(old_typ)))
+        native_width = native_layout_size(nv->ctxt, pointer_elt_type(old_typ));
       // we share the work with RemoveAggrs:
       // * we create the malloc-exp and if necessary, the tag_fat and cast
       // * we pass the malloc-exp as an attribute to RemoveAggrs,
@@ -2834,7 +2986,7 @@ void exp_to_c(env_t nv, exp_t e) {
       if (array_len != NULL) {
         lenvar = temp_var(nv->ctxt);
         lenexp = set_type(var_exp((qvar_t)lenvar, DL), uint_type);
-        mexp   = fncall_exp_dl(_check_times_e, lenexp, sizeoftype_exp(elt_typ, DL));
+        mexp   = fncall_exp_dl(_check_times_e, lenexp, native_width ? deep_copy(native_width) : sizeoftype_exp(elt_typ, DL));
         // e1 could be a comprehension -- in which case, we're duplicating
         // the bounds expression here (which could have effects.)  So we
         // change the bounds expression on the comprehension to be lenvar.
@@ -2849,7 +3001,7 @@ void exp_to_c(env_t nv, exp_t e) {
             break;
         }
       } else
-        mexp = sizeoftype_exp(elt_typ, DL);  // :( don't have destination anymore
+        mexp = native_width ? deep_copy(native_width) : sizeoftype_exp(elt_typ, DL);
       mexp->topt = uint_type;
       // deal with the struct hack (executing the bound twice and suffering
       // an unnecessary copy of the data)
@@ -2870,10 +3022,10 @@ void exp_to_c(env_t nv, exp_t e) {
         }
       }
       set_type(mexp, cstar_type(elt_typ, mt_tq));
-      e->annot = new NewInfo(mexp, cstar_type(elt_typ, mt_tq));
+      e->annot = new NewInfo(mexp, cstar_type(elt_typ, mt_tq), native_width);
       if (is_fat_ptr(old_typ)) {
         let e2 = set_type(deep_copy(e), cstar_type(elt_typ, mt_tq));
-        e->r   = fncall_exp_dl(_tag_fat_e, e2, sizeoftype_exp(elt_typ, DL),
+        e->r   = fncall_exp_dl(_tag_fat_e, e2, native_width ? deep_copy(native_width) : sizeoftype_exp(elt_typ, DL),
                              (lenexp ? lenexp : set_type(uint_exp(1, DL), uint_type)))
                    ->r;
       }
@@ -2890,10 +3042,15 @@ void exp_to_c(env_t nv, exp_t e) {
 
       // InsertChecks ensures we don't do checks under a sizeof
     case &Sizeofexp_e(e1):
+      if (native_layout_type((type_t)e1->topt) ||
+          (Flags::native_layouts && is_array_type((type_t)e1->topt))) {
+        e->r = native_layout_size(nv->ctxt, (type_t)e1->topt)->r;
+        break;
+      }
       exp_to_c(nv, e1);
       break;
     case &Sizeoftype_e(t):
-      e->r = new Sizeoftype_e(typ_to_c(nv->ctxt, t));
+      e->r = native_layout_size(nv->ctxt, t)->r;
       break;
     case &Offsetof_e(t, fs):
       e->r = new Offsetof_e(typ_to_c(nv->ctxt, t), fs);
@@ -2950,11 +3107,15 @@ void exp_to_c(env_t nv, exp_t e) {
     case &Deref_e(e1):
       did_inserted_checks = true;
       ptr_use_to_c(nv, e1, e->annot, NULL);
+      if (native_layout_type(old_typ))
+        e->r = fncall_exp_dl(_cyc_layout_load_e, e1, native_layout_size(nv->ctxt, old_typ))->r;
       break;
     case &Subscript_e(e1, e2):
       did_inserted_checks = true;
       enum PTR_ANS res    = ptr_use_to_c(nv, e1, e->annot, e2);
-      if (res == DIRECT_DEREF)
+      if (native_layout_type(old_typ))
+        e->r = fncall_exp_dl(_cyc_layout_load_e, e1, native_layout_size(nv->ctxt, old_typ))->r;
+      else if (res == DIRECT_DEREF)
         e->r = deref_exp_r(e1);
       else if (res == DROP_SUBSCRIPT)
         e->r = e1->r;
@@ -3263,16 +3424,16 @@ void exp_to_c(env_t nv, exp_t e) {
       }
       if (mknd == Calloc) {  // ignores aqopt for now ... revisit
         if ((rgnopt == NULL && aqopt == NULL) || Flags::no_regions) {
-          pexp = calloc_exp(nv->ctxt, *topt, sizeoftype_exp(t_c, DL), num_elts2);
+          pexp = calloc_exp(nv->ctxt, *topt, native_layout_size(nv->ctxt, *topt), num_elts2);
         } else {
           if (aqopt != NULL)
             exp_to_c(nv, aqopt);
           if (rgnopt != NULL) {
             exp_to_c(nv, rgnopt);
             pexp = rcalloc_exp(nv->ctxt, rgnopt, (aqopt == NULL ? aliasable_qual_exp(nv->ctxt) : aqopt),
-                               sizeoftype_exp(t_c, DL), num_elts2);
+                               native_layout_size(nv->ctxt, *topt), num_elts2);
           } else {
-            pexp = aqcalloc_exp(nv->ctxt, aqopt, sizeoftype_exp(t_c, DL), num_elts2);
+            pexp = aqcalloc_exp(nv->ctxt, aqopt, native_layout_size(nv->ctxt, *topt), num_elts2);
           }
         }
       } else {
@@ -3295,7 +3456,7 @@ void exp_to_c(env_t nv, exp_t e) {
       }
       if (is_fat) {
         exp_t elt_sz =
-            (mknd == Calloc ? sizeoftype_exp(t_c, DL) : set_type(uint_exp(1, DL), uint_type));
+            (mknd == Calloc ? native_layout_size(nv->ctxt, *topt) : set_type(uint_exp(1, DL), uint_type));
         exp_t rexp = fncall_exp_dl(_tag_fat_e, pexp, elt_sz, num_elts2);
         rexp->topt = fat_ptr_type(nv->ctxt);
         stmt_t s   = declare_stmt((qvar_t)x, ulong_type, checked_count, exp_stmt(rexp, DL), DL);
@@ -4588,6 +4749,17 @@ void stmt_to_c(env_t nv, stmt_t s) {
 ///////////////////////////////////////////////////////////////
 static void fndecl_to_c(env_t nv, fndecl_t f, bool cinclude) {
   let ctxt = nv->ctxt;
+  let saved_layouts = ctxt->native_layout_params;
+  let layout_args = native_layout_args(f->i.tvars);
+  if (Flags::native_layouts) {
+    int i = 0;
+    for (let tvs = f->i.tvars; tvs != NULL; tvs = tvs->tl)
+      if (Kinds::tvar_kind(tvs->hd, &Kinds::bk)->kind == BoxKind) {
+        let q = new $(Loc_n(), native_layout_name(i++));
+        let ex = set_type(var_exp(q, DL), ulong_type);
+        ctxt->native_layout_params = new List(new $(tvs->hd->identity, ex), ctxt->native_layout_params);
+      }
+  }
   f->i.tvars  = NULL;
   f->i.effect = NULL;
   //  f->i.rgn_po = NULL;
@@ -4607,6 +4779,7 @@ static void fndecl_to_c(env_t nv, fndecl_t f, bool cinclude) {
   // from Cyclone types to C, but otherwise leave the code alone.
   if (cinclude) {
     trans_stmttypes(ctxt, f->body);
+    ctxt->native_layout_params = saved_layouts;
     return;
   }
   ctxt->fn_pop_table = new Hashtable::lookup(*ctxt->pop_tables, f);
@@ -4621,7 +4794,9 @@ static void fndecl_to_c(env_t nv, fndecl_t f, bool cinclude) {
   // Tovc would like to use param_vardecls:
   for (let arg_vds = f->param_vardecls->v; arg_vds != NULL; arg_vds = arg_vds->tl)
     arg_vds->hd->type = typ_to_c(ctxt, arg_vds->hd->type);
+  f->i.args = append(layout_args, f->i.args);
   stmt_to_c(clear_toplevel(frgn, nv), f->body);
+  ctxt->native_layout_params = saved_layouts;
 }
 
 static scope_t scope_to_c(scope_t s) {
@@ -4887,6 +5062,13 @@ static void local_decl_to_c(env_t nv, vardecl_t vd, stmt_t s) {
       }
     } else
       exp_to_c(nv, init);
+    switch (compress(old_typ)) {
+      case &ArrayType(ai):
+        if (native_layout_type(ai.elt_type))
+          init->annot = new NativeArrayInit(native_layout_size(nv->ctxt, ai.elt_type));
+        break;
+      default: break;
+    }
   } else
     // must put in zero for zero-terminated arrays
     switch (compress(old_typ)) {
@@ -5174,6 +5356,7 @@ toc_context_t Toc_Ctx_create() {
     .aliasable_qual_exp_cache = NULL,
     .get_exn_thrown_exp_cache = NULL,
     .globals = NULL,
+    .native_layout_params = NULL,
     .callback_adapters = NULL
   };
 
@@ -5208,6 +5391,10 @@ toc_context_t Toc_Ctx_create() {
   _fat_ptr_plus_pr.f0.C_n                     = NULL;
   _fat_ptr_minus_pr.f0.C_n = NULL;
   _fat_ptr_diff_pr.f0.C_n = NULL;
+  _cyc_callback_bind_pr.f0.C_n = NULL;
+  _cyc_callback_register_bound_static_pr.f0.C_n = NULL;
+  _cyc_layout_load_pr.f0.C_n = NULL;
+  _cyc_layout_store_pr.f0.C_n = NULL;
   _cyc_callback_adapt_pr.f0.C_n = NULL;
   _cyc_callback_equal_pr.f0.C_n = NULL;
   _cyc_callback_register_static_pr.f0.C_n = NULL;
@@ -5241,7 +5428,7 @@ toc_context_t Toc_Ctx_create() {
   _rethrow_pr.f0.C_n                          = NULL;
   _throw_assert_pr.f0.C_n                     = NULL;
 
-  ctxt->globals = new {&_check_alloc_plus_str, &_check_alloc_size_str, &_cyc_callback_equal_str, &_cyc_callback_register_static_str, &_cyc_callback_adapt_str, &_throw_str,
+  ctxt->globals = new {&_cyc_callback_bind_str, &_cyc_callback_register_bound_static_str, &_cyc_layout_load_str, &_cyc_layout_store_str, &_check_alloc_plus_str, &_check_alloc_size_str, &_cyc_callback_equal_str, &_cyc_callback_register_static_str, &_cyc_callback_adapt_str, &_throw_str,
                  &setjmp_str,
                  &_push_handler_str,
                  &_pop_handler_str,

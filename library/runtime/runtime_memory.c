@@ -956,6 +956,15 @@ void *Cyc_Core_open_region(struct Cyc_Core_DynamicRegion *k, void *env,
   return body(&k->h, env);
 }
 
+/* Same native C operation with reified result/argument layouts. The callback
+   is monomorphic at this point; the caller has already bound its type args. */
+void *_cyc_layout_open_region(unsigned long result_width, unsigned long arg_width,
+                             struct Cyc_Core_DynamicRegion *k, void *env,
+                             void *body(struct _RegionHandle *, void *)) {
+  (void)result_width; (void)arg_width;
+  return body(&k->h, env);
+}
+
 // called before each profiled allocation to see if a GC has occurred
 // since the last allocation, and if so makes a log entry for it based
 // on the amount of freed data.

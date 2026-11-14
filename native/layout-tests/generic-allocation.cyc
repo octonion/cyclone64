@@ -1,0 +1,20 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `a @`r make_one(region_t<`r> r,`a value) { return rnew(r) value; }
+static `a ?`r repeat(region_t<`r> r,`a value,unsigned n) { return rnew(r) {for i<n:value}; }
+static `a ?`r triple(region_t<`r> r,`a x,`a y,`a z) { return rnew(r) {x,y,z}; }
+static unsigned width<`a::B>() { return sizeof(`a); }
+static unsigned value_width(`a value) { return sizeof(value); }
+int main(int argc,string_t ?argv) {
+  region r;
+  let one=make_one(r,-17);
+  if(*one!=-17 || width @<int>()!=4 || value_width(-17)!=4) return 1;
+  let ints=repeat(r,-31,3);
+  if(numelts(ints)!=3 || ints[0]!=-31 || ints[1]!=-31 || ints[2]!=-31) return 2;
+  let mixed=triple(r,10,-20,30);
+  if(numelts(mixed)!=3 || mixed[0]!=10 || mixed[1]!=-20 || mixed[2]!=30) return 3;
+  long big=0x1234567800000012L;
+  let longs=repeat(r,big,3);
+  if(numelts(longs)!=3 || longs[2]!=big || width @<long>()!=8) return 4;
+  return 0;
+}

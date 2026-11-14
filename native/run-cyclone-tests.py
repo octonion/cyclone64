@@ -11,6 +11,7 @@ p.add_argument('--compiler', help='explicit translator; keep BUILD standard libr
 p.add_argument('--output', help='separate probe log directory')
 p.add_argument('--stage-dir', help='source-built stage directory with cyclone64 and standard library objects')
 p.add_argument('--cc', default=os.environ.get('CC') or subprocess.check_output(['native/select-cc.sh'], text=True).strip())
+p.add_argument('--compiler-flags', default='')
 p.add_argument('--cflags', default='-O2 -g')
 p.add_argument('--runtime-include', default='library/std/cyc-lib')
 a = p.parse_args()
@@ -54,7 +55,7 @@ for src in sorted(pathlib.Path(a.probe_dir).glob('*.cyc')):
     for artifact in (pre, generated, out/src.stem): artifact.unlink(missing_ok=True)
     q = run([a.cc, '-E', '-x', 'c', '-Inative/include', src, '-o', pre], src.stem + '-cpp')
     if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue
-    q = run([compiler, '-o', generated, pre], src.stem + '-translate')
+    q = run([compiler, *shlex.split(a.compiler_flags), '-o', generated, pre], src.stem + '-translate')
     if q.returncode or not generated.is_file(): results.append((src.stem, f'TRANSLATE FAIL ({q.returncode})')); continue
     q = run([a.cc, '-std=gnu11', '-fno-strict-aliasing', *shlex.split(a.cflags), '-I'+a.runtime_include, generated, 'native/cyclone-tests/abi-helper.c', *objects, *runtime_libs(build), '-o', out / src.stem], src.stem + '-link')
     if q.returncode: results.append((src.stem, 'LINK FAIL')); continue

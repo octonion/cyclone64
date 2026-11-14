@@ -122,3 +122,17 @@ Desktop coredump count remains 30 (old last event Nov13 17:31:39); no new deskto
 crash reports were created. Expected-abort Banshee tests use child-only exit
 handling, and initial compiler runs use GDB containment. No global crash settings
 were changed. Checkpoints are not completion; the generic-reference work remains.
+
+2026-11-14 continuation: native generic layout convention
+--------------------------------------------------------
+The four previously failing generic-reference probes now pass with an explicit
+--native-layouts calling convention. Added forwarding/bound callback, generic
+allocation, logical sizeof and packed stack-array regressions also pass under
+ASan/UBSan/function. The entire compiler and standard library build with the
+new convention, and upstream tests pass with an instrumented translator and
+library. See native/NATIVE-LAYOUTS.txt for reproduction and limitations.
+This is still experimental: existential layout restoration fails, and generated
+C currently converges for 80/81 files (printf bounds-check nondeterminism).
+Banshee64's independent candidate status is unchanged. Cyclone64 is not yet a
+satisfactory final candidate. Desktop crash-report count remains 30; new ABI
+failures were contained under GDB. The autonomous conversion remains active.

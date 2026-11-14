@@ -318,8 +318,10 @@ static list_t<Absyn::decl_t> do_print(FILE @`H out_file, list_t<Absyn::decl_t, `
   params_r.print_all_kinds = print_all_kinds_r;
   params_r.print_all_effects = print_all_effects_r;
 
-  if (Flags::stop_after_pass > Flags::FlowAnalysis)
+  if (Flags::stop_after_pass > Flags::FlowAnalysis) {
+    if (Flags::native_layouts) fprintf(out_file, "#define CYC_NATIVE_LAYOUTS 1\n");
     fprintf(out_file, "#include <cyc_include.h>\n");
+  }
 
   if (pp_r) {
     Absynpp::set_params(&params_r);
@@ -582,12 +584,15 @@ using Arg {
   make_option(opt50, "--inf", false, "", Unit_spec, set_interproc,
               "Use interprocedural type inference");
 
+  make_option(opt51, "--native-layouts", false, "", Set_spec, &Flags::native_layouts,
+              "experimental native generic memory layout convention");
+
   struct List<option_t @`H,`H> @`H global_options[] = {
     &opt1, &opt2, &opt3, &opt4, &opt5, &opt6, &opt7, &opt8, &opt9, &opt10, &opt11, &opt12, &opt13,
         &opt14, &opt15, &opt16, &opt17, &opt18, &opt19, &opt20, &opt21, &opt22, &opt23, &opt24,
         &opt25, &opt26, &opt27, &opt28, &opt29, &opt30, &opt31, &opt32, &opt33, &opt34, &opt35,
         &opt36, &opt37, &opt38, &opt39, &opt40, &opt41, &opt42, &opt43, &opt44, &opt45, &opt46,
-        &opt47, &opt48, &opt49, &opt50,
+        &opt47, &opt48, &opt49, &opt50, &opt51,
   };
 
   void print_options() { usage(global_options[0], "<program.cyc>"); }

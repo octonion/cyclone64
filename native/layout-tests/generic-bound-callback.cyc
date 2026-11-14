@@ -1,0 +1,20 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `a read_value(`a @p) { return *p; }
+static `a read_other(`a @p) { return *p; }
+static `a forwarded(`a @p) { return read_value(p); }
+typedef `a (@reader_t<`a,`r>)(`a @`r);
+static reader_t<`a,`r> make_reader<`a::B,`r>() { return read_value; }
+static int (@global_reader)(int @) = read_value;
+static `a read_using(reader_t<`a,`r> f,`a @`r p) { return f(p); }
+static int small=-17;
+static long large=0x1234567800000012L;
+int main(int argc,string_t ?argv) {
+  if(forwarded(&small)!=small || forwarded(&large)!=large) return 1;
+  int (@f)(int @)=argc==1 ? read_value : read_other;
+  if(f(&small)!=small || global_reader(&small)!=small) return 2;
+  let g=make_reader @<int,`H>();
+  if(g(&small)!=small || read_using(g,&small)!=small) return 3;
+  if(g!=read_value || global_reader!=read_value) return 4;
+  return 0;
+}

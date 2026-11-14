@@ -43,10 +43,10 @@ typedef long long int64_t;
 #define DO_PLUS_FN(t)                                              \
   do {                                                             \
     t *__orig_x = (t *)(orig_x);                                   \
-    unsigned int _czs_temp;                                        \
+    size_t _czs_temp;                                        \
     if ((__orig_x) == 0)                                           \
       _throw_null_fn(filename, lineno);                            \
-    if (orig_i < 0 || orig_sz == 0)                                \
+    if (orig_i < 0 || orig_sz == 0 || (size_t)orig_i > PTRDIFF_MAX / sizeof(t))                                \
       _throw_arraybounds_fn(filename, lineno);                     \
     for (_czs_temp = orig_sz - 1; _czs_temp < orig_i; _czs_temp++) \
       if (__orig_x[_czs_temp] == 0)                                \
@@ -54,11 +54,11 @@ typedef long long int64_t;
     return __orig_x + orig_i;                                      \
   } while (0)
 
-char *_zero_arr_plus_char_fn(char *orig_x, unsigned int orig_sz, int orig_i, const char *filename,
+char *_zero_arr_plus_char_fn(char *orig_x, unsigned int orig_sz, ptrdiff_t orig_i, const char *filename,
                              unsigned lineno) {
   DO_PLUS_FN(char);
 }
-void *_zero_arr_plus_other_fn(unsigned t, void *orig_x, unsigned orig_sz, int orig_i,
+void *_zero_arr_plus_other_fn(unsigned t, void *orig_x, unsigned orig_sz, ptrdiff_t orig_i,
                               const char *filename, unsigned lineno) {
   switch (t) {
     case 1:
@@ -116,26 +116,26 @@ unsigned _get_zero_arr_size_other(unsigned t, const void *orig_x, unsigned orig_
 
 /* Does in-place addition of a zero-terminated pointer (x += e and ++x).
    Note that this expands to call _zero_arr_plus_<type>_fn. */
-char *_zero_arr_inplace_plus_char_fn(char **x, int orig_i, const char *filename, unsigned lineno) {
+char *_zero_arr_inplace_plus_char_fn(char **x, ptrdiff_t orig_i, const char *filename, unsigned lineno) {
   *x = _zero_arr_plus_char_fn(*x, 1, orig_i, filename, lineno);
   return *x;
 }
-void *_zero_arr_inplace_plus_other_fn(unsigned t, void **x, int orig_i, const char *filename,
+void *_zero_arr_inplace_plus_other_fn(unsigned t, void **x, ptrdiff_t orig_i, const char *filename,
                                       unsigned lineno) {
   *x = _zero_arr_plus_other_fn(t, *x, 1, orig_i, filename, lineno);
   return *x;
 }
 
 /* Does in-place increment of a zero-terminated pointer (e.g., x++). */
-char *_zero_arr_inplace_plus_post_char_fn(char **x, int orig_i, const char *filename,
+char *_zero_arr_inplace_plus_post_char_fn(char **x, ptrdiff_t orig_i, const char *filename,
                                           unsigned lineno) {
   char *_zap_res = *x;
   *x = _zero_arr_plus_char_fn(_zap_res, 1, orig_i, filename, lineno);
   return _zap_res;
 }
-void *_zero_arr_inplace_plus_post_voidstar_fn(unsigned t, void **x, int orig_i,
+void *_zero_arr_inplace_plus_post_other_fn(unsigned t, void **x, ptrdiff_t orig_i,
                                               const char *filename, unsigned lineno) {
-  void **_zap_res = *x;
+  void *_zap_res = *x;
   *x = _zero_arr_plus_other_fn(t, _zap_res, 1, orig_i, filename, lineno);
   return _zap_res;
 }

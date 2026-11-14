@@ -8,5 +8,10 @@ int main(int argc, string_t ?argv) {
   // On LP64, signed long represents every unsigned int value.
   if (!(s < u)) return 1;
   if (sizeof(s + u) != sizeof(long)) return 2;
+  unsigned long ul = 1UL;
+  long long ll = (long long)s;
+  if (ll < ul || ul > ll) return 3;
+  if (!(s < u) || !(u > s)) return 4;
+  if (s + u != 0L || u + s != 0L) return 5;
   return 0;
 }

@@ -2740,6 +2740,9 @@ pattern
 		    case &Const_e ({ .Wstring_c = _ }):
 		      Warn::err (SLOC (@1), "strings cannot occur within patterns");
 		      break;
+		    case &Const_e ({ .Long_c = _ }):
+		      Warn::err (SLOC (@1), "long constants in patterns not yet implemented");
+		      break;
 		    case &Const_e ({ .LongLong_c = _ }):
 		      Warn::err (SLOC (@1), "long long's in patterns not yet implemented");
 		      break;

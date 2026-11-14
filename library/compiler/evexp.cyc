@@ -55,10 +55,12 @@ eval_const_uint_exp(exp_t e) {
     return $(0, false);
 
   switch (promote_const(cn)) {
-    case {.LongLong_c = $(_, x)}:
-      // FIX!!!!!!!!!!
-      long long unsigned y = (unsigned long long)x >> 32;
-      if (y != 0xffffffff && y != 0x00000000)
+    case {.Long_c = $(sn, x)}:
+      fallthru(sn, (long long)x);
+    case {.LongLong_c = $(sn, x)}:
+      if (sn == Unsigned) {
+        if ((unsigned long long)x > (unsigned long long)(~0U)) return $(0, false);
+      } else if (x > (long long)(~0U) || x < -(long long)((~0U) >> 1) - 1)
         return $(0, false);
       return $((unsigned int)x, true);
 
@@ -80,6 +82,8 @@ static $(bool, bool) eval_const_bool_exp(exp_t e) {
 
   switch (promote_const(cn)) {
     case {.Int_c = $(_, b)}:
+      return $(b != 0, true);
+    case {.Long_c = $(_, b)}:
       return $(b != 0, true);
     case {.LongLong_c = $(_, b)}:
       return $(b != 0, true);
@@ -109,8 +113,14 @@ static $(cnst_t, bool) eval_const_unprimop(primop_t p, exp_t e) {
     case $(Minus, {.Char_c = $(s, i)}):
       cn = Char_c(Signed, -i);
       break;
+    case $(Minus, {.Long_c = $(s, i)}):
+      // Keep signed minimum negation symbolic; unsigned negation wraps.
+      if (s != Unsigned && i == -(long)((~0UL) >> 1) - 1) return $(cn, false);
+      cn = Long_c(s, (long)(0UL - (unsigned long)i));
+      break;
     case $(Minus, {.LongLong_c = $(s, i)}):
-      cn = LongLong_c(Signed, -i);
+      if (s != Unsigned && i == -(long long)((~0ULL) >> 1) - 1) return $(cn, false);
+      cn = LongLong_c(s, (long long)(0ULL - (unsigned long long)i));
       break;
     case $(Bitnot, {.Int_c = $(s, i)}):
       cn = Int_c(Unsigned, ~i);
@@ -121,8 +131,11 @@ static $(cnst_t, bool) eval_const_unprimop(primop_t p, exp_t e) {
     case $(Bitnot, {.Char_c = $(s, i)}):
       cn = Char_c(Unsigned, ~i);
       break;
+    case $(Bitnot, {.Long_c = $(s, i)}):
+      cn = Long_c(s, ~i);
+      break;
     case $(Bitnot, {.LongLong_c = $(s, i)}):
-      cn = LongLong_c(Unsigned, ~i);
+      cn = LongLong_c(s, ~i);
       break;
     case $(Not, {.Int_c = $(_, i)}):
       cn = Int_c(Signed, i == 0 ? 1 : 0);
@@ -136,8 +149,11 @@ static $(cnst_t, bool) eval_const_unprimop(primop_t p, exp_t e) {
     case $(Not, {.Null_c = _}):
       cn = Int_c(Signed, 1);
       break;
+    case $(Not, {.Long_c = $(_, i)}):
+      cn = Int_c(Signed, i == 0 ? 1 : 0);
+      break;
     case $(Not, {.LongLong_c = $(_, i)}):
-      cn = LongLong_c(Signed, i == 0 ? 1 : 0);
+      cn = Int_c(Signed, i == 0 ? 1 : 0);
       break;
     default:
       return $(cn, false);
@@ -440,6 +456,7 @@ static $(cnst_t, bool) eval_const_exp(exp_t e) {
               long long value = sn2 == Unsigned ? (long long)(unsigned int)x : (long long)x;
               // Report the value to constant-pattern checking without replacing
               // the typed cast by an Int_c node in the executable AST.
+              if (sz == Long_sz) return $(Long_c(sn, (long)value), true);
               return $(LongLong_c(sn, value), true);
             }
             if (sn != sn2)
@@ -552,6 +569,8 @@ static unsigned long long integral_const_to_long_long(cnst_t c) {
       return s;
     case {.Int_c = $(_, i)}:
       return i;
+    case {.Long_c = $(_, x)}:
+      return (unsigned long long)x;
     case {.LongLong_c = $(_, x)}:
       return x;
     default:

@@ -755,6 +755,7 @@ cnst_t Char_c(sign_t sn, char c) { return Cnst{.Char_c = $(sn, c)}; }
 cnst_t Wchar_c(string_t<`H> s) { return Cnst{.Wchar_c = s}; }
 cnst_t Short_c(sign_t sn, short s) { return Cnst{.Short_c = $(sn, s)}; }
 cnst_t Int_c(sign_t sn, int i) { return Cnst{.Int_c = $(sn, i)}; }
+cnst_t Long_c(sign_t sn, long l) { return Cnst{.Long_c = $(sn, l)}; }
 cnst_t LongLong_c(sign_t sn, long long l) { return Cnst{.LongLong_c = $(sn, l)}; }
 cnst_t Float_c(string_t<`H> s, int i) { return Cnst{.Float_c = $(s, i)}; }
 cnst_t String_c(string_t<`H> s) { return Cnst{.String_c = s}; }

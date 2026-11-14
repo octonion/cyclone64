@@ -60,6 +60,7 @@ namespace Absynpp {
   doc_t decl2doc(decl_t);
 
   string_t longlong2string(unsigned long long);
+  string_t wide_integer2string(Absyn::sign_t, unsigned long long, bool);
   string_t typ2string(type_t);   // doesn't rewrite temp tvars
   string_t typ2cstring(type_t);  // doesn't rewrite temp tvars
   string_t kind2string(kind_t);

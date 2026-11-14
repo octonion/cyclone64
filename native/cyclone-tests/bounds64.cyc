@@ -2,8 +2,21 @@
 using Core;
 extern "C" unsigned long abi_large_index(void);
 int main(int argc, string_t ?argv) {
-  int ?a=new {10,20,30};
+  region r;
+  int ?a=rnew(r) {10,20,30};
   unsigned long index=abi_large_index();
-  try { int value=a[index]; return 1; }
-  catch { default: return 0; }
+  try { int value=a[index]; return 11; } catch { default: break; }
+  try { int value=a[0x100000001UL]; return 12; } catch { default: break; }
+  try { int value=a[18446744073709551615UL]; return 13; } catch { default: break; }
+  try { int value=a[-9223372036854775807L-1L]; return 14; } catch { default: break; }
+  int thin[3]={10,20,30};
+  try { int value=thin[index]; return 15; } catch { default: break; }
+  const char *@zeroterm z="abc";
+  try { char value=z[index]; return 16; } catch { default: break; }
+  try { char value=z[18446744073709551615UL]; return 17; } catch { default: break; }
+  unsigned long small=2UL;
+  if (a[small] != 30 || thin[small] != 30 || z[small] != 'c') return 2;
+  int ?tail=a+2;
+  if (tail[-2L] != 10) return 3;
+  return 0;
 }

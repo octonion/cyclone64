@@ -73,3 +73,7 @@ $(BUILD)/check-constant-fold: native/compiler-checks/constant-fold.c $(CYC_COMMO
 
 $(BUILD)/errorgen64: native/generated/errorgen.c $(CYC_RUNTIME)
 	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) $(CYC_FLAGS) $^ $(LDFLAGS) -lbacktrace -ldl -lm -o $@
+
+$(BUILD)/check-runtime-bounds: native/compiler-checks/runtime-bounds.c library/runtime/runtime_zeroterm.c library/std/cyc-lib/cyc_include.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) -Ilibrary/std/cyc-lib $(filter %.c,$^) $(LDFLAGS) -o $@

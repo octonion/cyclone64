@@ -1,4 +1,5 @@
 #include <cyc_include.h>
+extern long Cyc_Tcutil_is_integral_type(void *);
  struct Cyc_Core_Opt{void*v;};struct _tuple0{void*f0;void*f1;};
 # 108 "./cyclone/library/std/core.h"
 void*Cyc_Core_snd(struct _tuple0*);extern char Cyc_Core_Failure[8U];struct Cyc_Core_Failure_exn_struct{char*tag;struct _fat_ptr f1;};extern char Cyc_Core_Not_found[10U];struct Cyc_Core_Not_found_exn_struct{char*tag;};
@@ -1841,7 +1842,7 @@ Cyc_Tcenv_clear_abstract_val_ok(te);_T2= e1;Cyc_Tcexp_tcExp(_T1,0,_T2);_T3=
 Cyc_Tcenv_clear_abstract_val_ok(te);_T4= e2;Cyc_Tcexp_tcExp(_T3,0,_T4);_T5= e1;_T6= _T5->topt;_T7= 
 _check_null(_T6);{void*t1=Cyc_Absyn_compress(_T7);_T8= e2;_T9= _T8->topt;_TA= 
 _check_null(_T9);{void*t2=Cyc_Absyn_compress(_TA);_TB= 
-Cyc_Tcutil_coerce_sint_type(e2);if(_TB)goto _TL329;else{goto _TL32B;}
+Cyc_Tcutil_is_integral_type(t2);if(_TB)goto _TL329;else{goto _TL32B;}
 _TL32B:{struct Cyc_Warn_String_Warn_Warg_struct _T6A;_T6A.tag= 0;({__typeof__(_tag_fat("expecting int subscript, found ",sizeof(char),32U))_T6B=_tag_fat("expecting int subscript, found ",sizeof(char),32U);_T6A.f1= _T6B;});_TD= _T6A;}{struct Cyc_Warn_String_Warn_Warg_struct _T6A=_TD;{struct Cyc_Warn_Typ_Warn_Warg_struct _T6B;_T6B.tag= 2;_T6B.f1= t2;_TE= _T6B;}{struct Cyc_Warn_Typ_Warn_Warg_struct _T6B=_TE;void*_T6C[2];_T6C[0]= & _T6A;_T6C[1]= & _T6B;_TF= te;_T10= e2;_T11= _T10->loc;_T12= topt;_T13= _tag_fat(_T6C,sizeof(void*),2);_TC= Cyc_Tcexp_expr_err(_TF,_T11,_T12,_T13);}}return _TC;_TL329: {struct Cyc_List_List*_T6A;long _T6B;void*_T6C;void*_T6D;void*_T6E;struct Cyc_Absyn_Tqual _T6F;void*_T70;_T14= t1;_T15= (int*)_T14;_T16= *_T15;switch(_T16){case 4: _T17= t1;{struct Cyc_Absyn_PointerType_Absyn_Type_struct*_T71=(struct Cyc_Absyn_PointerType_Absyn_Type_struct*)_T17;_T18= _T71->f1;_T70= _T18.elt_type;_T19= _T71->f1;_T6F= _T19.elt_tq;_T1A= _T71->f1;_T1B= _T1A.ptr_atts;_T6E= _T1B.eff;_T1C= _T71->f1;_T1D= _T1C.ptr_atts;_T6D= _T1D.bounds;_T1E= _T71->f1;_T1F= _T1E.ptr_atts;_T6C= _T1F.zero_term;}{void*t=_T70;struct Cyc_Absyn_Tqual tq=_T6F;void*rt=_T6E;void*b=_T6D;void*zt=_T6C;_T20= 
 # 1951
 Cyc_Tcutil_is_cvar_type(b);if(!_T20)goto _TL32D;_T21= loc;_T22= b;_T23= 

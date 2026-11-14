@@ -1983,8 +1983,8 @@ bool will_lose_precision(type_t t1, type_t t2) {
         case $(&IntCon(_, LongLong_sz), _):
           return true;  // see prev cases
 
-          // FIX:  assuming sizeof(int) = sizeof(long)
         case $(&IntCon(_, Long_sz), &IntCon(_, Int_sz)):
+          return sizeof(long) > sizeof(int);
         case $(&IntCon(_, Int_sz), &IntCon(_, Long_sz)):
           return false;
 
@@ -2034,6 +2034,14 @@ type_t max_arithmetic_type(type_t t1, type_t t2) {
         case $(&IntCon(Unsigned, LongLong_sz), _):
         case $(_, &IntCon(Unsigned, LongLong_sz)):
           return ulonglong_type;
+        // A higher-rank signed type wins only when it represents every
+        // value of the lower-rank unsigned type (C usual conversions).
+        case $(&IntCon(_, LongLong_sz), &IntCon(Unsigned, Long_sz)):
+        case $(&IntCon(Unsigned, Long_sz), &IntCon(_, LongLong_sz)):
+          return sizeof(long long) > sizeof(long) ? slonglong_type : ulonglong_type;
+        case $(&IntCon(_, LongLong_sz), &IntCon(Unsigned, Int_sz)):
+        case $(&IntCon(Unsigned, Int_sz), &IntCon(_, LongLong_sz)):
+          return sizeof(long long) > sizeof(int) ? slonglong_type : ulonglong_type;
         case $(&IntCon(_, LongLong_sz), _):
         case $(_, &IntCon(_, LongLong_sz)):
           return slonglong_type;
@@ -2042,7 +2050,12 @@ type_t max_arithmetic_type(type_t t1, type_t t2) {
         case $(_, &IntCon(Unsigned, Long_sz)):
           return ulong_type;
 
-          // FIX: I don't think these are the right promotion rules
+        case $(&IntCon(_, Long_sz), &IntCon(Unsigned, Int_sz)):
+        case $(&IntCon(Unsigned, Int_sz), &IntCon(_, Long_sz)):
+        case $(&IntCon(_, Long_sz), &TagCon):
+        case $(&TagCon, &IntCon(_, Long_sz)):
+          return sizeof(long) > sizeof(int) ? slong_type : ulong_type;
+
         case $(&TagCon, _):
         case $(_, &TagCon):
         case $(&IntCon(Unsigned, Int_sz), _):
@@ -2250,6 +2263,7 @@ bool is_zero(exp_t e) {
     case &Const_e({.Int_c = $(_, 0)}):
     case &Const_e({.Char_c = $(_, 0)}):
     case &Const_e({.Short_c = $(_, 0)}):
+    case &Const_e({.Long_c = $(_, 0)}):
     case &Const_e({.LongLong_c = $(_, 0)}):
     case &Const_e({.Int128_c = $(_, 0)}):
     case &Pragma_e(...):

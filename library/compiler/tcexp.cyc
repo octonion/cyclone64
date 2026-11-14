@@ -194,6 +194,10 @@ static type_t tcConst(Tc::tc_context_t ctx, tenv_t te, seg_t loc, type_t *topt, 
       return ushort_type;
     case {.Short_c = _}:
       return sshort_type;
+    case {.Long_c = $(Unsigned, _)}:
+      return ulong_type;
+    case {.Long_c = _}:
+      return slong_type;
     case {.LongLong_c = $(Unsigned, _)}:
       return ulonglong_type;
     case {.LongLong_c = _}:
@@ -1942,8 +1946,8 @@ static type_t tcSubscript(Tc::tc_context_t ctx, tenv_t te_orig, seg_t loc, type_
   tcExp(ctx, clear_abstract_val_ok(te), NULL, e2);
   type_t t1 = compress((type_t)e1->topt);
   type_t t2 = compress((type_t)e2->topt);
-  if (!coerce_sint_type(e2))
-    return expr_err(te, e2->loc, topt, "expecting int subscript, found ", t2);
+  if (!is_integral_type(t2))
+    return expr_err(te, e2->loc, topt, "expecting integral subscript, found ", t2);
   // the subscript could be on a tuple or a pointer -- any arrays
   // should've been coerced to pointers
   switch (t1) {

@@ -1179,7 +1179,7 @@ void*ta1=Cyc_Toc_typ_to_c(ta);_T51= index;_T52= (unsigned)_T51;
 if(!_T52)goto _TL10F;_T50= index;goto _TL110;_TL10F: _T53= Cyc_Absyn_uint_exp(0U,0U);_T54= Cyc_Absyn_uint_type;_T50= Cyc_Absyn_set_type(_T53,_T54);_TL110: {struct Cyc_Absyn_Exp*ind=_T50;
 # 1246
 struct _tuple13 _T9D=Cyc_Evexp_eval_const_uint_exp(bd);long _T9E;unsigned _T9F;_T9F= _T9D.f0;_T9E= _T9D.f1;{unsigned i=_T9F;long valid=_T9E;_T55= valid;
-if(_T55)goto _TL115;else{goto _TL113;}_TL115: if(i!=1U)goto _TL113;else{goto _TL114;}_TL114: _T56= ptr;_T57= _T56->topt;_T58= _check_null(_T57);_T59= Cyc_Tcutil_is_zeroterm_pointer_type(_T58);if(_T59)goto _TL111;else{goto _TL113;}
+if(_T55)goto _TL115;else{goto _TL113;}_TL115: if(i!=1U)goto _TL113;else{goto _TL114;}_TL114: _T59= Cyc_Tcutil_is_zeroterm_pointer_type(old_typ);if(_T59)goto _TL111;else{goto _TL113;}
 # 1250
 _TL113:{struct Cyc_Absyn_Exp*newp=Cyc_Toc_deep_copy(ptr);
 void*_TA0=Cyc_Absyn_compress(ta1);struct Cyc_Absyn_ArrayInfo _TA1;_T5A= (int*)_TA0;_T5B= *_T5A;if(_T5B!=5)goto _TL116;{struct Cyc_Absyn_ArrayType_Absyn_Type_struct*_TA2=(struct Cyc_Absyn_ArrayType_Absyn_Type_struct*)_TA0;_TA1= _TA2->f1;}{struct Cyc_Absyn_ArrayInfo ainfo=_TA1;_T5C= newp;_T5D= ainfo;_T5E= _T5D.elt_type;_T5F= tq;
@@ -1629,7 +1629,7 @@ void*_T5E8=_T12->r;struct Cyc_Absyn_Stmt*_T5E9;struct _fat_ptr*_T5EA;struct Cyc_
 # 1775
 Cyc_Absyn_signed_int_exp(0,0U);_T1B= Cyc_Toc_void_star_type();{struct Cyc_Absyn_Exp*zero=Cyc_Absyn_set_type(_T1A,_T1B);_T1C= 
 # 1777
-Cyc_Absyn_bounds_one();_T1D= Cyc_Tcutil_get_pointer_bounds(old_typ);_T1E= _check_null(_T1D);_T1F= Cyc_Tcutil_get_bounds_exp_constrain(_T1C,_T1E,1);if(_T1F!=0)goto _TL181;_T20= 
+Cyc_Absyn_bounds_one();_T1D= Cyc_Tcutil_get_pointer_bounds(Cyc_Absyn_compress(old_typ));_T1E= _check_null(_T1D);_T1F= Cyc_Tcutil_get_bounds_exp_constrain(_T1C,_T1E,1);if(_T1F!=0)goto _TL181;_T20=
 Cyc_Toc_is_toplevel(nv);if(!_T20)goto _TL183;_T21= e;_T22= 
 Cyc_Toc_make_toplevel_dyn_arr(old_typ,zero,zero);_T21->r= _T22->r;goto _TL184;
 # 1781

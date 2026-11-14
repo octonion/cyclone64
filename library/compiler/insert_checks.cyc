@@ -435,6 +435,18 @@ static void do_exp(env_t nv, exp_t e) {
           if (bds_ck && nv.vcgen_r)
             // try to eliminate the check using the vcgen.
             bds_ck = need_bounds_check_vcgen(nv, e1);
+          // The proof terms still use 32-bit Uint arithmetic. A wide index
+          // must retain a runtime check even if that model claims it is safe.
+          if (e2->topt != NULL) switch (compress((type_t)e2->topt)) {
+            case &AppType(&IntCon(_, Long_sz), _):
+              if (sizeof(long) > sizeof(int)) bds_ck = true;
+              break;
+            case &AppType(&IntCon(_, LongLong_sz), _):
+            case &AppType(&IntCon(_, Int128_sz), _):
+              bds_ck = true;
+              break;
+            default: break;
+          }
           if (bds_ck && Flags::warn_bounds_checks)
             warn(e1->loc, "inserted bounds check at %s", Absynpp::exp2string(e));
           exp_opt_t bd = Tcutil::get_bounds_exp_constrain(bounds_one(), b, true);

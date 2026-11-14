@@ -1,0 +1,12 @@
+#include "cyclone/library/std/core.h"
+using Core;
+typedef int *intptr;
+typedef int ?fatptr;
+intptr thin_zero() { return (int)0; }
+fatptr fat_zero() { return (int)0; }
+int main(int argc, string_t ?argv) {
+  intptr p=thin_zero();
+  fatptr q=fat_zero();
+  if (p != NULL || q != NULL) return 1;
+  return 0;
+}

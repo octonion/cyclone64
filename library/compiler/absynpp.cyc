@@ -1988,22 +1988,25 @@ doc_t exps2doc_prec(int inprec, list_t<exp_t> es) {
   return group("", "", ",", List::map_c(exp2doc_prec, inprec, es));
 }
 
-string_t longlong2string(unsigned long long i) {
-  char ? x = new { for
-      i < 28 : 'z'
-  };
-  x[27]     = '\0';
-  x[26]     = 'L';
-  x[25]     = 'L';
-  x[24]     = 'U';
-  x[23]     = '0';
-  int index = 23;
-  while (i != 0) {
+static string_t integer_digits(unsigned long long i) {
+  char ?x = new { for j < 24 : '\0' };
+  int index = 22;
+  do {
     x[index] = (char)('0' + (i % 10));
-    i        = i / 10;
+    i = i / 10;
     --index;
-  }
+  } while (i != 0);
   return x + index + 1;
+}
+string_t longlong2string(unsigned long long i) {
+  return strconcat(integer_digits(i), "ULL");
+}
+string_t wide_integer2string(sign_t sign, unsigned long long bits, bool is_long) {
+  string_t suffix = is_long ? "L" : "LL";
+  if (sign == Unsigned) return strconcat(integer_digits(bits), strconcat("U", suffix));
+  if ((long long)bits >= 0) return strconcat(integer_digits(bits), suffix);
+  // Express negative minima without an out-of-range positive signed literal.
+  return aprintf("(-%s%s-1%s)", integer_digits(0ULL - bits - 1ULL), suffix, suffix);
 }
 
 // FIX: take care of sign for Char_c and Short_c
@@ -2023,8 +2026,10 @@ doc_t cnst2doc(cnst_t c) {
         return text(aprintf("%uU", (unsigned)i));
       return text(aprintf("%d", i));
 
+    case {.Long_c = $(sg, i)}:
+      return text(wide_integer2string(sg, (unsigned long long)i, true));
     case {.LongLong_c = $(sg, i)}:
-      return text(longlong2string(i));  // FIX: use sign!
+      return text(wide_integer2string(sg, (unsigned long long)i, false));
 
     case {.Int128_c = $(sg, i)}:
       return text(longlong2string(i));  // FIX: use sign!

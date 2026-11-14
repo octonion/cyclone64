@@ -178,6 +178,8 @@ static int hash_const(Absyn::cnst_t c) {
       return c;
     case Absyn::Cnst{.Int_c = $(_, i)}:
       return i;
+    case Absyn::Cnst{.Long_c = $(_, i)}:
+      return (int)i;
     case Absyn::Cnst{.LongLong_c = $(_, i)}:
       return (int)i;
     case Absyn::Cnst{.Int128_c = $(_, i)}:

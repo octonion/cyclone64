@@ -1513,6 +1513,7 @@ static ctype_t gen_exp(bool takeaddress, cenv_t env, exp_t e) {
     case &Const_e({.Char_c = $(_, _)}):
     case &Const_e({.Wchar_c = _}):
     case &Const_e({.Short_c = $(_, _)}):
+    case &Const_e({.Long_c = $(_, _)}):
     case &Const_e({.LongLong_c = $(_, _)}):
     case &Const_e({.Int128_c = $(_, _)}):
     case &Sizeoftype_e(_):

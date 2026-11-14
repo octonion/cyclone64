@@ -136,6 +136,8 @@ static char cnst2char(cnst_t cnst, Lexing::Lexbuf lb) {
   switch (cnst) {
     case {.Int_c = $(_, i)}:
       return (char)i;
+    case {.Long_c = $(_, i)}:
+      return (char)i;
     case {.LongLong_c = $(_, i)}:
       return (char)i;
     case {.Char_c = $(_, c)}:
@@ -493,59 +495,47 @@ static int int_of_char(char c) {
 }
 
 static cnst_t intconst(Lexing::Lexbuf lbuf, int start, int end, int base) {
-  sign_t sn = None;
-
   start += lbuf->lex_start_pos;
   mstring_t buff = lbuf->lex_buffer + start;
-  int end2 = lbuf->lex_curr_pos - end;
-  int len = end2 - start;
-  size_of_t size = Int_sz;
-  bool declared_size = false;
-  cnst_t res;
-
-  if (len >= 1 && (buff[len - 1] == 'l' || buff[len - 1] == 'L')) {
-    // size is at least long (default), but could be long long
-    len -= 1;
-    declared_size = true;
-    if (len >= 1 && (buff[len - 1] == 'l' || buff[len - 1] == 'L')) {
-      len -= 1;
-      size = LongLong_sz;
-    }
+  int len = lbuf->lex_curr_pos - end - start;
+  bool is_unsigned = false;
+  int rank = 0;
+  // The lexer admits U before or after L/LL, in either case.
+  while (len > 0) {
+    char c = buff[len - 1];
+    if (c == 'u' || c == 'U') is_unsigned = true;
+    else if (c == 'l' || c == 'L') ++rank;
+    else break;
+    --len;
   }
-  if (len >= 1 && (buff[len - 1] == 'u' || buff[len - 1] == 'U')) {
-    len -= 1;
-    sn = Unsigned;
+  unsigned long long n = 0;
+  unsigned long long max = ~0ULL;
+  for (int i = 0; i < len; ++i) {
+    unsigned long long digit = (unsigned long long)int_of_char(buff[i]);
+    if (digit >= (unsigned)base || n > (max - digit) / (unsigned)base) {
+      err("integer constant too large", lbuf);
+      return Int_c(Signed, 0);
+    }
+    n = n * (unsigned)base + digit;
   }
-  if (sn == Unsigned) {
-    unsigned long long int n = 0;
-    for (int i = 0; i < len; i++)
-      n = n * base + (unsigned long long int)int_of_char(buff[i]);
-    if (n > ((unsigned long long int)0xffffffff)) {
-      if (declared_size && size == Int_sz)
-        err("integer constant too large", lbuf);
-      size = LongLong_sz;
-    }
-    if (size == Int_sz)
-      res = Cnst{.Int_c = $(sn, (unsigned)n)};
-    else
-      res = Cnst{.LongLong_c = $(sn, n)};
-  } else {
-    long long int n = 0;
-    for (int i = 0; i < len; i++) {
-      n = n * base + (long long int)int_of_char(buff[i]);
-    }
-    long long unsigned x = ((unsigned long long)n >> 32);
-    if (x != 0xffffffff && x != 0x00000000) {
-      if (declared_size && size == Int_sz)
-        err("integer constant too large", lbuf);
-      size = LongLong_sz;
-    }
-    if (size == Int_sz)
-      res = Cnst{.Int_c = $(sn, (int)n)};
-    else
-      res = Cnst{.LongLong_c = $(sn, n)};
+  unsigned long long uint_max = (unsigned long long)(~0U);
+  unsigned long long int_max = uint_max >> 1;
+  unsigned long long ulong_max = (unsigned long long)(~0UL);
+  unsigned long long long_max = ulong_max >> 1;
+  unsigned long long llong_max = max >> 1;
+  bool allow_unsigned = is_unsigned || base != 10;
+  if (rank == 0) {
+    if (!is_unsigned && n <= int_max) return Int_c(Signed, (int)n);
+    if (allow_unsigned && n <= uint_max) return Int_c(Unsigned, (int)n);
   }
-  return res;
+  if (rank <= 1) {
+    if (!is_unsigned && n <= long_max) return Long_c(Signed, (long)n);
+    if (allow_unsigned && n <= ulong_max) return Long_c(Unsigned, (long)n);
+  }
+  if (!is_unsigned && n <= llong_max) return LongLong_c(Signed, (long long)n);
+  if (allow_unsigned) return LongLong_c(Unsigned, (long long)n);
+  err("integer constant too large", lbuf);
+  return Int_c(Signed, 0);
 }
 
 // ************************* STRING CONSTANTS *************************
@@ -929,7 +919,8 @@ let newline     = ('\n' | '\r' | "\r\n")
 let notnewline  = [^ '\n' '\r']
 let idchar      = ['A'-'Z''a'-'z''0'-'9''_']
 let firstidchar = ['A'-'Z''a'-'z']
-let cnstsuffix  = ['u''U']?['l''L']?['l''L']?
+let longsuffix = ('l' 'l'? | 'L' 'L'?)
+let cnstsuffix = (['u''U'] longsuffix? | longsuffix ['u''U']?)?
                 | ['l''L']?['l''L']?['u''U']?
 
 rule token = parse

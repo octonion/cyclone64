@@ -940,9 +940,11 @@ static void dumpexp_prec(int inprec, exp_t e) {
     case &Const_e({.Int_c = $(_, i)}):
       dump(aprintf("%uU", i));
       break;
+    case &Const_e({.Long_c = $(sg, i)}):
+      dump(Absynpp::wide_integer2string(sg, (unsigned long long)i, true));
+      break;
     case &Const_e({.LongLong_c = $(sg, i)}):
-      // FIX -- take sign into account
-      dump(Absynpp::longlong2string(i));
+      dump(Absynpp::wide_integer2string(sg, (unsigned long long)i, false));
       break;
     case &Const_e({.Int128_c = $(sg, i)}):
       // FIX -- take sign into account

@@ -587,6 +587,7 @@ namespace Absyn {
     string_t Wchar_c;
     $(sign_t, short) Short_c;
     $(sign_t, int) Int_c;
+    $(sign_t, long) Long_c;
     $(sign_t, long long) LongLong_c;
     $(sign_t, long long) Int128_c;
     $(string_t, int) Float_c;  // 0=>float, 1=>double, _=>long double
@@ -1172,6 +1173,7 @@ namespace Absyn {
   cnst_t Wchar_c(string_t<`H>);
   cnst_t Short_c(sign_t, short);
   cnst_t Int_c(sign_t, int);
+  cnst_t Long_c(sign_t, long);
   cnst_t LongLong_c(sign_t, long long);
   cnst_t Int128_c(sign_t, long long);
   cnst_t Float_c(string_t<`H>, int);

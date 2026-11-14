@@ -6,6 +6,7 @@
 #include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* Need one of these per thread (see runtime_stack.c). The runtime maintains
    a stack that contains either _handler_cons structs or _RegionHandle structs.
@@ -141,7 +142,7 @@ extern char Cyc_Assert[];
 #define _check_known_subscript_null(ptr, bound, elt_sz, index) \
   ({                                                           \
     char *_cks_ptr = (char *)(ptr);                            \
-    int _index = (index);                                      \
+    __auto_type _index = (index);                                      \
     if (!_cks_ptr)                                             \
       _throw_null();                                           \
     _cks_ptr + (elt_sz) * _index;                              \
@@ -150,29 +151,29 @@ extern char Cyc_Assert[];
 #define _zero_arr_plus_char_fn(orig_x, orig_sz, orig_i, f, l) ((orig_x) + (orig_i))
 #define _zero_arr_plus_other_fn(t_sz, orig_x, orig_sz, orig_i, f, l) ((orig_x) + (orig_i))
 #else
+/* Preserve the caller's index width, reject before multiplying, and evaluate
+ * every argument once. A checked subscript never manufactures an invalid
+ * pointer and then attempts to validate it. */
+#define _checked_known_subscript(ptr, bound, elt_sz, index, null_check) \
+  ({ \
+    char *_cks_ptr = (char *)(ptr); \
+    __auto_type _cks_index = (index); \
+    __auto_type _cks_bound = (bound); \
+    size_t _cks_size = (elt_sz); \
+    if ((null_check) && !_cks_ptr) _throw_null(); \
+    if (_cks_index < 0 || _cks_index >= _cks_bound || !_cks_size || \
+        _cks_index > SIZE_MAX / _cks_size) _throw_arraybounds(); \
+    _cks_ptr + (size_t)_cks_index * _cks_size; \
+  })
 #define _check_known_subscript_null(ptr, bound, elt_sz, index) \
-  ({                                                           \
-    char *_cks_ptr = (char *)(ptr);                            \
-    unsigned _cks_index = (index);                             \
-    if (!_cks_ptr)                                             \
-      _throw_null();                                           \
-    if (_cks_index >= (bound))                                 \
-      _throw_arraybounds();                                    \
-    _cks_ptr + (elt_sz) * _cks_index;                          \
-  })
+  _checked_known_subscript(ptr, bound, elt_sz, index, 1)
 #define _check_known_subscript_notnull(ptr, bound, elt_sz, index) \
-  ({                                                              \
-    char *_cks_ptr = (char *)(ptr);                               \
-    unsigned _cks_index = (index);                                \
-    if (_cks_index >= (bound))                                    \
-      _throw_arraybounds();                                       \
-    _cks_ptr + (elt_sz) * _cks_index;                             \
-  })
+  _checked_known_subscript(ptr, bound, elt_sz, index, 0)
 
 /* _zero_arr_plus_*_fn(x,sz,i,filename,lineno) adds i to zero-terminated ptr
    x that has at least sz elements */
-char *_zero_arr_plus_char_fn(char *, unsigned, int, const char *, unsigned);
-void *_zero_arr_plus_other_fn(unsigned, void *, unsigned, int, const char *, unsigned);
+char *_zero_arr_plus_char_fn(char *, unsigned, ptrdiff_t, const char *, unsigned);
+void *_zero_arr_plus_other_fn(unsigned, void *, unsigned, ptrdiff_t, const char *, unsigned);
 #endif
 
 /* _get_zero_arr_size_*(x,sz) returns the number of elements in a
@@ -182,21 +183,30 @@ unsigned _get_zero_arr_size_other(unsigned t, const void *orig_x, unsigned orig_
 
 /* _zero_arr_inplace_plus_*_fn(x,i,filename,lineno) sets
    zero-terminated pointer *x to *x + i */
-char *_zero_arr_inplace_plus_char_fn(char **, int, const char *file, unsigned line);
-char *_zero_arr_inplace_plus_post_char_fn(char **, int, const char *file, unsigned line);
+char *_zero_arr_inplace_plus_char_fn(char **, ptrdiff_t, const char *file, unsigned line);
+char *_zero_arr_inplace_plus_post_char_fn(char **, ptrdiff_t, const char *file, unsigned line);
 // note: must cast result in toc.cyc
-void *_zero_arr_inplace_plus_other_fn(unsigned, void **, int, const char *file, unsigned line);
-void *_zero_arr_inplace_plus_post_other_fn(unsigned, void **, int, const char *file, unsigned line);
-#define _zero_arr_plus_char(x, s, i) (_zero_arr_plus_char_fn(x, s, i, __FILE__, __LINE__))
+void *_zero_arr_inplace_plus_other_fn(unsigned, void **, ptrdiff_t, const char *file, unsigned line);
+void *_zero_arr_inplace_plus_post_other_fn(unsigned, void **, ptrdiff_t, const char *file, unsigned line);
+/* Check in the original integer type before conversion to the scan offset. */
+#ifdef NO_CYC_BOUNDS_CHECKS
+#define _zero_arr_index(i) (i)
+#else
+#define _zero_arr_index(i) \
+  ({ __auto_type _zai = (i); \
+     if (_zai < 0 || _zai > PTRDIFF_MAX) _throw_arraybounds(); \
+     (ptrdiff_t)_zai; })
+#endif
+#define _zero_arr_plus_char(x, s, i) (_zero_arr_plus_char_fn(x, s, _zero_arr_index(i), __FILE__, __LINE__))
 #define _zero_arr_inplace_plus_char(x, i) \
-  _zero_arr_inplace_plus_char_fn((char **)(x), i, __FILE__, __LINE__)
+  _zero_arr_inplace_plus_char_fn((char **)(x), _zero_arr_index(i), __FILE__, __LINE__)
 #define _zero_arr_inplace_plus_post_char(x, i) \
-  _zero_arr_inplace_plus_post_char_fn((char **)(x), (i), __FILE__, __LINE__)
-#define _zero_arr_plus_other(t, x, s, i) (_zero_arr_plus_other_fn(t, x, s, i, __FILE__, __LINE__))
+  _zero_arr_inplace_plus_post_char_fn((char **)(x), _zero_arr_index(i), __FILE__, __LINE__)
+#define _zero_arr_plus_other(t, x, s, i) (_zero_arr_plus_other_fn(t, x, s, _zero_arr_index(i), __FILE__, __LINE__))
 #define _zero_arr_inplace_plus_other(t, x, i) \
-  _zero_arr_inplace_plus_other_fn(t, (void **)(x), i, __FILE__, __LINE__)
+  _zero_arr_inplace_plus_other_fn(t, (void **)(x), _zero_arr_index(i), __FILE__, __LINE__)
 #define _zero_arr_inplace_plus_post_other(t, x, i) \
-  _zero_arr_inplace_plus_post_other_fn(t, (void **)(x), (i), __FILE__, __LINE__)
+  _zero_arr_inplace_plus_post_other_fn(t, (void **)(x), _zero_arr_index(i), __FILE__, __LINE__)
 
 #define _ptr_offset(elt_sz, index) ((ptrdiff_t)((elt_sz) * (index)))
 
@@ -206,14 +216,29 @@ void *_zero_arr_inplace_plus_post_other_fn(unsigned, void **, int, const char *f
 #define _untag_fat_ptr_check_bound(arr, elt_sz, num_elts) ((arr).curr)
 #define _check_fat_at_base(arr) (arr)
 #else
-#define _check_fat_subscript(arr, elt_sz, index)                          \
-  ({                                                                      \
-    struct _fat_ptr _cus_arr = (arr);                                     \
-    unsigned char *_cus_ans = _cus_arr.curr + _ptr_offset(elt_sz, index); \
-    /* JGM: not needed! if (!_cus_arr.base) _throw_null();*/              \
-    if (_cus_ans < _cus_arr.base || _cus_ans >= _cus_arr.last_plus_one)   \
-      _throw_arraybounds();                                               \
-    _cus_ans;                                                             \
+#define _check_fat_subscript(arr, elt_sz, index) \
+  ({ \
+    struct _fat_ptr _cus_arr = (arr); \
+    __auto_type _cus_index = (index); \
+    size_t _cus_size = (elt_sz); \
+    uintptr_t _cus_base = (uintptr_t)_cus_arr.base; \
+    uintptr_t _cus_curr = (uintptr_t)_cus_arr.curr; \
+    uintptr_t _cus_end = (uintptr_t)_cus_arr.last_plus_one; \
+    if (!_cus_base || !_cus_size || _cus_curr < _cus_base || \
+        _cus_curr > _cus_end) _throw_arraybounds(); \
+    uintptr_t _cus_result; \
+    if (_cus_index < 0) { \
+      /* -(index+1) is representable even for the signed minimum. */ \
+      if (-(_cus_index + 1) >= (_cus_curr - _cus_base) / _cus_size) \
+        _throw_arraybounds(); \
+      size_t _cus_back = (size_t)(-(_cus_index + 1)) + 1; \
+      _cus_result = _cus_curr - _cus_back * _cus_size; \
+    } else { \
+      if (_cus_index >= (_cus_end - _cus_curr) / _cus_size) \
+        _throw_arraybounds(); \
+      _cus_result = _cus_curr + (size_t)_cus_index * _cus_size; \
+    } \
+    (unsigned char *)_cus_result; \
   })
 #define _untag_fat_ptr(arr, elt_sz, num_elts) ((arr).curr)
 #define _untag_fat_ptr_check_bound(arr, elt_sz, num_elts)                                  \

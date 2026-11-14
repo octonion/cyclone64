@@ -1199,7 +1199,7 @@ static enum PTR_ANS ptr_use_to_c(env_t nv, exp_t ptr, absyn_annot_t annot, exp_o
           // requiring the bound to be 1 is a hack, but avoids strange
           // performance degradation (surprising searches for 0)
           let $(i, valid) = Evexp::eval_const_uint_exp(bd);
-          if (!valid || i != 1 || !is_zeroterm_pointer_type((type_t)ptr->topt)) {
+          if (!valid || i != 1 || !is_zeroterm_pointer_type(old_typ)) {
             // ((ta1*)_fn_e(e1, esz, sizeof(ta1), ind)
             // JGM: must do something different when ta1 is an array type.
             let newp = deep_copy(ptr);
@@ -1729,7 +1729,7 @@ void exp_to_c(env_t nv, exp_t e) {
       // note: we don't need the element type b/c the length is 0 (so we lie)
       let zero = set_type(signed_int_exp(0, DL), void_star_type(nv->ctxt));
 
-      if (get_bounds_exp_constrain(bounds_one(), get_pointer_bounds(old_typ), true) == NULL) {
+      if (get_bounds_exp_constrain(bounds_one(), get_pointer_bounds(compress(old_typ)), true) == NULL) {
         if (is_toplevel(nv))
           e->r = make_toplevel_dyn_arr(nv->ctxt, old_typ, zero, zero)->r;
         else

@@ -76,89 +76,129 @@ and cross-build function-ID compatibility are not established. Region allocation
 is pointer-word aligned, not over-aligned; individual allocations remain capped
 near 2 GiB. Passing these tests is not exhaustive verification of the solver.
 
-## Cyclone reproduction
+## Cyclone reproduction (wide indices and literals)
+
+Use the latest installed stable GCC selected by `native/select-cc.sh`, or set
+`CC` / pass `--cc`. Ryzen builds use `-march=native`. The independent Banshee
+build and the isolated branch remain unchanged by bootstrap outputs.
 
 ```sh
 native/prepare-bootstrap.sh > native/logs/prepare-bootstrap.log 2>&1
-native/bootstrap-stage1.py --out native/bootstrap/lp64-final-stage1
+native/bootstrap-stage1.py --out native/bootstrap/wide-clean-stage1
 native/bootstrap-stage1.py \
-  --compiler native/bootstrap/lp64-final-stage1/cyclone64 \
-  --out native/bootstrap/lp64-final-stage2
+  --compiler native/bootstrap/wide-clean-stage1/cyclone64 \
+  --out native/bootstrap/wide-clean-stage2
 native/bootstrap-stage1.py \
-  --compiler native/bootstrap/lp64-final-stage2/cyclone64 \
-  --out native/bootstrap/lp64-final-stage3
-native/run-cyclone-tests.py --stage-dir native/bootstrap/lp64-final-stage2
-native/run-cyctest.py --stage-dir native/bootstrap/lp64-final-stage1
+  --compiler native/bootstrap/wide-clean-stage2/cyclone64 \
+  --out native/bootstrap/wide-clean-stage3
+native/run-cyclone-tests.py --skip-diagnostics \
+  --stage-dir native/bootstrap/wide-clean-stage3
+native/run-cyctest.py --stage-dir native/bootstrap/wide-clean-stage3
 ```
 
-Generation, translation, compilation, linking, commands, and diagnostics stay
-under `native/`. The two test runners deliberately return failure for the
-unresolved regressions; they never rewrite upstream reference outputs.
-The upstream library suite runs under GDB so an unexpected fatal signal can be
-examined without creating a desktop crash report. SIGUSR1/SIGUSR2 are passed
-through for the suite's signal tests.
+The fresh stage2/stage3 generated C is **81/81 byte-identical**; stage1/stage2
+is 42/81. Each stage compiles 81 Cyclone inputs and two C support files and
+links a native compiler. The bootstrap script records all commands and phase
+logs, accepts `--jobs` (default 4), and supports `--cflags` for instrumentation.
 
-Native buildlib, cyclex, Bison, and errorgen produce libc wrappers, both lexers,
-and parser/error headers. All 41 hand-written compiler modules, 35 standard
-library modules, five generated/tool modules, and two C support files compile;
-the native stage1, stage2, and stage3 compilers link. The binding generator still reports
-unsupported `assert.h` and `stdarg.h`: assert is supplied by the existing Cyclone
-implementation via `native/compat/assert.h`; unused C `va_list` inclusion was
-removed from the aggregate library module. The sigaction wrapper now matches
-the host declaration's leaf attribute.
+All six native language regressions and four overflow-rejection inputs pass:
+ABI/full-width values, wide subscripts, signed/unsigned promotions, literal
+limits/suffixes, the original large-literal example, and null pointer typedefs.
+`--skip-diagnostics` skips only exact historical diagnostic-text comparisons;
+it does not skip these language or rejection tests. Without this option the
+runner still returns failure for two historical reference differences, described
+below. The upstream library runner still fails for the generic tuple bug.
 
-The runtime calls `Cyc_main` with the actual generated `_fat_ptr` ABI. Compiler
-fixes keep int/long type identities distinct, preserve wide casts during constant
-evaluation, and prevent the proof-term folder from executing shifts >=32 or
-INT_MIN/-1 division/remainder. Source and checked-in stage0 C are patched together.
-The strengthened ABI test checks its 64-bit result against an independent C
-constant, in addition to sizes, high addresses, argv, calls, and region arrays.
-It passes both normally and with ASan/UBSan-instrumented generated C/runtime.
-The direct constant-folder boundary test also passes under ASan/UBSan.
+The changes preserve integral subscript widths in type checking and keep runtime
+checks for wide indices that the 32-bit proof model cannot justify. Runtime
+checks reject invalid indices before forming pointers or multiplying offsets.
+Fat pointers, bounded thin arrays, and zero-terminated scans are covered,
+including negative offsets, LONG_MIN, ULONG_MAX, 2^32+1, one-past pointers,
+128-bit indices at the runtime macro boundary, and single argument evaluation.
+Zero-termination is inspected before translation erases its annotation.
 
-To reproduce runtime instrumentation independently of compiler leak failures:
+The source compiler has a distinct Long_c constant variant. Lexing checks
+multiply/add overflow and selects integer rank and signedness without dropping
+upper bits; output preserves L/UL/LL/ULL and prints zero and signed minima
+correctly. The usual arithmetic conversions distinguish LP64 signed long from
+unsigned int, and unsigned long from same-width signed long long. Null pointer
+translation now expands typedefs before looking up pointer bounds.
+
+**Stage0 is a bootstrap compiler**, with minimal compatible fixes (including
+zero-ULL printing). It still has the old constant AST and lexer. Build the
+source-derived compiler for the complete literal fixes. Do not mix individual
+new Long_c-based generated compiler modules into the old stage0 ABI.
+
+Native buildlib, cyclex, Bison, and errorgen generate libc bindings, both lexers,
+and parser/error headers. The existing compatibility assert header supplies the
+unsupported binding; unused stdarg inclusion is excluded from the aggregate
+module. No system compiler, library, or crash-report configuration is changed.
+
+## Sanitizer checks
 
 ```sh
-make -f native/Makefile BUILD=native/asan \
-  CFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all' cyclone
-native/run-cyclone-tests.py --build native/asan \
-  --compiler native/bootstrap/lp64-final-stage1/cyclone64 \
-  --output native/asan/runtime-final-probes \
+make -f native/Makefile native/build/check-runtime-bounds
+native/build/check-runtime-bounds
+make -f native/Makefile -j12 BUILD=native/asan \
+  CFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all' \
+  cyclone check rlib-check native/asan/check-runtime-bounds
+native/asan/check-runtime-bounds
+native/run-cyclone-tests.py --skip-diagnostics --build native/asan \
+  --compiler native/bootstrap/wide-clean-stage3/cyclone64 \
+  --output native/asan/wide-clean-probes \
   --cflags '-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all'
 ```
 
-## Remaining Cyclone blockers
+All ten language/rejection checks pass with ASan/UBSan instrumented emitted C,
+standard-library support, and runtime. The direct bounds checks also pass with
+GCC 15 and Clang 21. Seven Banshee regressions and eight upstream region tests
+pass again in normal and ASan/UBSan builds, with leak detection enabled.
+Intentional allocator-abort tests retain their child-only exit handler.
 
-1. **Large unsigned-long literals:** stage0 rejects `0x123456789abcdef0UL`;
-   source-built stages accept it but emit only `2596069104U`, losing the upper
-   bits. `native/cyclone-tests/long-literal.cyc` returns 3 with stage1/stage2.
-   `lex.cyl:intconst` and the constant AST still lack a faithful LP64 long model.
-2. **Bounds/index narrowing:** `bounds64.cyc` passes `0x100000001UL` as an index
-   into three elements. Generated C converts it to int before
-   `_check_fat_subscript`, accessing element 1 instead of throwing. It returns 1.
-   The index conversion and runtime overflow/bounds arithmetic need a coordinated
-   fix, not merely a wider literal parser.
-3. **Arithmetic promotions:** `integer-promotion.cyc` demonstrates signed long -1
-   compared with unsigned int 1 incorrectly. `tcutil.cyc:max_arithmetic_type`,
-   precision checks, and the proof/range machinery retain ILP32 assumptions.
-4. **Generic aggregate ABI:** the upstream suite's Fn currying assertion
-   `apply(apply(addc,1),2) == 3` fails with both stage0 and rebuilt stage1 libraries.
-   Generic tuples use pointer-sized fields while concrete `(int,int)` tuples use
-   four-byte fields. Boxing/layout and erased callback ABI need further work.
-   The suite reaches the remaining suites; one Fn assertion is reported failed.
-5. **Compiler LeakSanitizer:** upstream `nogc.c` does not reclaim ordinary GC
-   allocations. A sanitized compiler run of the ABI input reports leaks (for
-   example 653282 bytes/17876 allocations before the final type changes).
-   Leak detection has not been disabled to manufacture a passing result.
-6. **Bootstrap convergence and remaining diagnostics:** stage1 versus stage2 has
-   46/81 byte-identical generated C files; many differences replace `_throw` with
-   `_rethrow`. Stage2 versus stage3 converges: **81/81 generated C files are
-   byte-identical**. Six of eight upstream diagnostic references match; `fail3` differs by
-   a column and `zeroptr` retains its reference's expected compiler exception with
-   a changed source line. Pointer-width and callback warnings remain under audit.
-7. **No working 32-bit reference:** missing Scrt1.o, crti.o, and 32-bit libgcc
-   prevent `gcc-15 -m32` linking. No 32/64 behavioral equivalence is claimed.
+To instrument the source compiler itself, use `--build native/asan`, an explicit
+non-sanitized `--compiler`, and the sanitizer `--cflags` above with
+`native/bootstrap-stage1.py`. This build succeeds, but translating
+`literal-limits.cyc` still exits 1 from LeakSanitizer: **1,185,131 bytes in
+18,574 allocations**, originating in the upstream `nogc.c` allocation path.
+That run reports no other ASan/UBSan error. Leak detection remains enabled;
+passing emitted-program checks do not imply that the compiler is leak-free.
 
-Do not infer correctness from the bootstrap or the ABI smoke test alone. The
-failing language cases above are retained as executable regressions for the next
-iteration.
+## Remaining verified blockers and limits
+
+1. **Generic tuple/erased callback ABI:** the upstream Fn currying assertion at
+   `testsuite/cyctest/suites/fn_suite.h:31` still fails. The minimized
+   `native/cyclone-blockers/generic-tuple.cyc` reads an eight-byte concrete
+   `(int,int)` pair through a sixteen-byte generic `(void*,void*)` layout.
+   UBSan reports insufficient object space. This requires a consistent
+   representation and access/call ABI, including writes and address-taking;
+   padding one test's tuple is not a general repair.
+2. **Pointer arithmetic remains separate from subscripting:**
+   `native/cyclone-blockers/pointer-add.cyc` demonstrates `a + 0x100000001UL`
+   still narrowing to int in `tcPlus`, then reading element 1. The corresponding
+   `a[index]` regression now throws correctly. Pointer +/-/compound assignment,
+   offset helpers, and allocation-size/proof arithmetic require further audit.
+3. **Compiler allocation ownership/GC:** the source compiler still leaks as
+   measured above. It uses the historical no-GC runtime. No lifetime workaround
+   or disabled sanitizer is presented as a repair.
+4. **Literal and proof scope:** integer literals are supported through 64 bits;
+   overflow is diagnosed. Long/long-long constant patterns remain explicitly
+   unsupported in the parser. The general proof engine still uses 32-bit terms;
+   forcing wide subscript checks is conservative, not a full proof-engine port.
+5. **Historical diagnostics:** six of eight reference files match exactly.
+   `fail3` differs by one source column. `zeroptr` now compiles successfully;
+   its old reference expected an internal Null_Exception. Upstream references
+   have deliberately been retained, and `null-alias.cyc` checks the repaired
+   behavior at runtime. The full reference runner therefore still exits 1.
+6. **32-bit comparison:** multilib startup objects and libgcc remain unavailable;
+   no working 32-bit reference or 32/64 equivalence is claimed. Native GCC C
+   helpers independently check the literal values and ABI expectations.
+
+To reproduce the remaining minimized failures with sanitizers, pass
+`--probe-dir native/cyclone-blockers` to the native test runner, with the
+instrumentation options above. Both inputs intentionally return a failing
+status; UBSan stops the tuple case without an abort/core dump. The upstream
+library runner uses GDB to contain unexpected fatal signals. The crash audit
+found no new entries during this iteration (after 20:00 EST on November 13);
+30 older records exist, most recently at 17:31:39, all preceding this work.
+
+Bootstrap convergence is useful evidence, not a claim of complete LP64 safety.

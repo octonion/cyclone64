@@ -1,0 +1,7 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `b second($(`a,`b) @p) { return (*p)[1]; }
+int main(int argc, string_t ?argv) {
+  $(int,int) pair=$(1,2);
+  return second(&pair) == 2 ? 0 : 1;
+}

@@ -1,0 +1,9 @@
+#include "cyclone/library/std/core.h"
+using Core;
+extern "C" unsigned long abi_large_index(void);
+int main(int argc, string_t ?argv) {
+  region r;
+  int ?a=rnew(r) {10,20,30};
+  try { int ?p=a+abi_large_index(); int value=p[0]; return 1; }
+  catch { default: return 0; }
+}

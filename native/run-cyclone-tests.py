@@ -2,6 +2,8 @@
 """Run stage0 diagnostics and native ABI probes; retain all generated code/logs."""
 import argparse, difflib, os, pathlib, subprocess, sys
 p = argparse.ArgumentParser()
+p.add_argument('--skip-diagnostics', action='store_true', help='skip exact upstream diagnostic text comparisons')
+p.add_argument('--probe-dir', default='native/cyclone-tests')
 p.add_argument('--build', default='native/build')
 p.add_argument('--compiler', help='explicit translator; keep BUILD standard library/runtime objects')
 p.add_argument('--output', help='separate probe log directory')
@@ -23,7 +25,7 @@ def run(cmd, label):
         return proc
     except subprocess.TimeoutExpired:
         raise SystemExit('TIMEOUT: ' + label)
-for ref in sorted(pathlib.Path('testsuite/compiler').glob('*.ref')):
+for ref in ([] if a.skip_diagnostics else sorted(pathlib.Path('testsuite/compiler').glob('*.ref'))):
     src = ref.with_suffix('.cyc'); pre = out / (src.stem + '.cyp')
     q = run([a.cc, '-nostdinc', '-x', 'c', '-E', '-isystem', 'testsuite/compiler/lib', src, '-o', pre], src.stem + '-cpp')
     if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue
@@ -32,10 +34,15 @@ for ref in sorted(pathlib.Path('testsuite/compiler').glob('*.ref')):
     expected = ref.read_text()
     (out / (src.stem + '.diff')).write_text(''.join(difflib.unified_diff(expected.splitlines(True), got.splitlines(True))))
     results.append((src.stem, 'PASS' if got == expected else f'DIFF (exit {q.returncode})'))
+# Overflow must be diagnosed rather than silently wrapping in the lexer.
+for src in sorted(pathlib.Path('native/cyclone-reject').glob('*.cyc')):
+    q = run([compiler, '-o', out / (src.stem + '.c'), src], src.stem)
+    ok = q.returncode == 1 and 'integer constant too large' in q.stdout + q.stderr
+    results.append((src.stem, 'PASS' if ok else f'REJECTION FAIL ({q.returncode})'))
 objects = sorted((build / 'cyclone/stage0/library/std').rglob('*.o')) + sorted((build / 'cyclone/library/runtime').glob('*.o'))
 if stage:
     objects = sorted((stage/'library/std').glob('*.o')) + [stage/'native/generated/lineno.o',stage/'native/generated/libc/cycstubs.o',stage/'cstubs.o',stage/'boot_cstubs.o'] + sorted((build/'cyclone/library/runtime').glob('*.o'))
-for src in sorted(pathlib.Path('native/cyclone-tests').glob('*.cyc')):
+for src in sorted(pathlib.Path(a.probe_dir).glob('*.cyc')):
     pre = out / (src.stem + '.cyp'); generated = out / (src.stem + '.c')
     q = run([a.cc, '-E', '-x', 'c', '-Inative/include', src, '-o', pre], src.stem + '-cpp')
     if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue

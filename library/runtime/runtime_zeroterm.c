@@ -36,13 +36,13 @@ typedef long long int64_t;
    ensures that x[0..i-1] are not 0. */
 // FIX: throws a NULL exception if we don't support a type-size, but
 //      that is very uninformative as to what actually happened.
-// Note: This used to be more portable, but long-winded.  Now assumes
-//  sizeof(int)=sizeof(float)=sizeof(void*) and all three zero's are the
-//  same.  Even the old way is a hack because we don't support structs, etc.
+// Scan supported scalar representations without writing through the source.
+// Integer/pointer elements use an all-bits-zero terminator; aggregate element
+// types are not supported by this runtime helper.
 #ifndef NO_CYC_BOUNDS_CHECKS
 #define DO_PLUS_FN(t)                                              \
   do {                                                             \
-    t *__orig_x = (t *)(orig_x);                                   \
+    const t *__orig_x = (const t *)(orig_x);                                   \
     size_t _czs_temp;                                        \
     if ((__orig_x) == 0)                                           \
       _throw_null_fn(filename, lineno);                            \
@@ -51,14 +51,14 @@ typedef long long int64_t;
     for (_czs_temp = orig_sz - 1; _czs_temp < orig_i; _czs_temp++) \
       if (__orig_x[_czs_temp] == 0)                                \
         _throw_arraybounds_fn(filename, lineno);                   \
-    return __orig_x + orig_i;                                      \
+    return (void *)(__orig_x + orig_i);                                      \
   } while (0)
 
-char *_zero_arr_plus_char_fn(char *orig_x, unsigned int orig_sz, ptrdiff_t orig_i, const char *filename,
+char *_zero_arr_plus_char_fn(const char *orig_x, unsigned int orig_sz, ptrdiff_t orig_i, const char *filename,
                              unsigned lineno) {
   DO_PLUS_FN(char);
 }
-void *_zero_arr_plus_other_fn(unsigned t, void *orig_x, unsigned orig_sz, ptrdiff_t orig_i,
+void *_zero_arr_plus_other_fn(unsigned t, const void *orig_x, unsigned orig_sz, ptrdiff_t orig_i,
                               const char *filename, unsigned lineno) {
   switch (t) {
     case 1:
@@ -144,12 +144,16 @@ void *_zero_arr_inplace_plus_post_other_fn(unsigned t, void **x, ptrdiff_t orig_
    the size of the pointer's type.  Note that this can't be a macro
    if we're to get initializers right. */
 struct _fat_ptr _fat_ptr_decrease_size(struct _fat_ptr x, size_t sz, size_t numelts) {
-  unsigned delta = sz * numelts;
-  /* Don't let someone decrease the size so much that it wraps around.
-   * This is crucial to get NULL right. */
-  if (x.last_plus_one - x.base >= delta)
-    x.last_plus_one -= delta;
-  else
+  uintptr_t base = (uintptr_t)x.base;
+  uintptr_t end = (uintptr_t)x.last_plus_one;
+  /* Saturate at base without narrowing a wide extent or overflowing the
+   * product. Integer address arithmetic also covers spans above PTRDIFF_MAX. */
+  if (end < base || (sz != 0 && numelts > SIZE_MAX / sz)) {
     x.last_plus_one = x.base;
+    return x;
+  }
+  size_t delta = sz * numelts;
+  x.last_plus_one = delta <= end - base
+      ? (unsigned char *)(end - delta) : x.base;
   return x;
 }

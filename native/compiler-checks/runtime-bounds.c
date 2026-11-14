@@ -17,6 +17,22 @@ int main(void) {
   REJECT(_cyc_layout_array_size(4,-1));
   REJECT(_cyc_layout_array_size(4,(unsigned __int128)1<<100));
   REJECT(_cyc_layout_array_size(0,1));
+  struct _fat_ptr large_extent=_tag_fat((void *)(uintptr_t)0x1000,1,0x100000101UL);
+  struct _fat_ptr shrunk=_fat_ptr_decrease_size(large_extent,1,0x100000001UL);
+  if((uintptr_t)shrunk.last_plus_one != (uintptr_t)large_extent.base+0x100) {
+    fputs("wide fat-pointer shrink lost high bits\n",stderr); return 1;
+  }
+  shrunk=_fat_ptr_decrease_size(large_extent,8,0x200000001UL);
+  assert(shrunk.last_plus_one==large_extent.base);
+  shrunk=_fat_ptr_decrease_size(large_extent,SIZE_MAX,2);
+  assert(shrunk.last_plus_one==large_extent.base);
+  shrunk=_fat_ptr_decrease_size(large_extent,0,SIZE_MAX);
+  assert(shrunk.last_plus_one==large_extent.last_plus_one);
+  shrunk=_fat_ptr_decrease_size(large_extent,1,0);
+  assert(shrunk.last_plus_one==large_extent.last_plus_one);
+  struct _fat_ptr above_ptrdiff=_tag_fat((void *)(uintptr_t)0x1000,1,UINTPTR_MAX-0x2000UL);
+  shrunk=_fat_ptr_decrease_size(above_ptrdiff,1,(size_t)PTRDIFF_MAX+1);
+  assert((uintptr_t)shrunk.last_plus_one==(uintptr_t)above_ptrdiff.last_plus_one-((size_t)PTRDIFF_MAX+1));
   int a[]={10,20,30};
   struct _fat_ptr p={(void *)a,(void *)a,(void *)(a+3)};
   assert(*(int *)_check_fat_subscript(p,sizeof(int),2UL)==30);
@@ -56,6 +72,10 @@ int main(void) {
   REJECT(_check_known_subscript_notnull(a,3,sizeof(int),-1L));
   REJECT(_check_known_subscript_null(NULL,3,sizeof(int),0));
   assert(*(int *)_check_known_subscript_notnull(a,3,sizeof(int),2UL)==30);
+  const char *constant="abc";
+  const int constant_ints[]={7,9,0};
+  assert(*_zero_arr_plus_char(constant,1,2UL)=='c');
+  assert(*(const int *)_zero_arr_plus_other(sizeof(int),constant_ints,1,1UL)==9);
   char z[]="abc";
   assert(*_zero_arr_plus_char(z,1,2UL)=='c');
   REJECT(_zero_arr_plus_char(z,1,0x100000001UL));

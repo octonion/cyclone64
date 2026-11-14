@@ -185,8 +185,8 @@ extern char Cyc_Assert[];
 
 /* _zero_arr_plus_*_fn(x,sz,i,filename,lineno) adds i to zero-terminated ptr
    x that has at least sz elements */
-char *_zero_arr_plus_char_fn(char *, unsigned, ptrdiff_t, const char *, unsigned);
-void *_zero_arr_plus_other_fn(unsigned, void *, unsigned, ptrdiff_t, const char *, unsigned);
+char *_zero_arr_plus_char_fn(const char *, unsigned, ptrdiff_t, const char *, unsigned);
+void *_zero_arr_plus_other_fn(unsigned, const void *, unsigned, ptrdiff_t, const char *, unsigned);
 #endif
 
 /* _get_zero_arr_size_*(x,sz) returns the number of elements in a

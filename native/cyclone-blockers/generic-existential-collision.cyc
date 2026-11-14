@@ -1,0 +1,27 @@
+#include "cyclone/library/std/core.h"
+using Core;
+struct Collision {
+  <`a::B> : regions(`a)<=`H
+  `a @p;
+  int _cyc_exist_layout_0;
+  int __cyc_exist_layout_1;
+};
+// Untagged existential values remain constructible and copyable; the language
+// already rejects patterns that would unpack their hidden type.
+union Opaque { <`a::B> `a value; };
+static union Opaque opaque={.value=17};
+static int small=-29;
+static long wide=0x1234567800000012L;
+static struct Collision global_box={.p=&small,._cyc_exist_layout_0=13,.__cyc_exist_layout_1=27};
+static int inspect(struct Collision box,unsigned width) {
+  let Collision{<`a> p,x,y}=box;
+  let value=*p;
+  *p=value;
+  return sizeof(`a)==width && x==13 && y==27 ? 0 : 1;
+}
+int main(int argc,string_t ?argv) {
+  long @p=&wide;
+  struct Collision box={.p=p,._cyc_exist_layout_0=13,.__cyc_exist_layout_1=27};
+  union Opaque copy=opaque;
+  return inspect(global_box,4) || inspect(box,8) || sizeof(copy)!=sizeof(void *) ? 1 : 0;
+}

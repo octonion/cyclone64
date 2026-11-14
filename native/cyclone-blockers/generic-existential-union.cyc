@@ -1,0 +1,45 @@
+#include "cyclone/library/std/core.h"
+using Core;
+@tagged union Packed {
+  <`a::B> : regions(`a) <= `H
+  `a @p;
+  `a value;
+};
+static int small=-17;
+static long wide=0x1234567800000012L;
+static `a read_value(`a @p) { return *p; }
+static union Packed pack(`a::B @`H p : regions(`a)<=`H) { return Packed{.p=p}; }
+static union Packed global_box={.p=&small};
+static int inspect(union Packed box,unsigned width) {
+  switch(box) {
+    case Packed{<`a> .p=p}:
+      if(sizeof(`a)!=width) return 1;
+      let value=*p;
+      `a (@f)(`a @)=read_value;
+      if(f(p)!=value) return 2;
+      *p=value;
+      union Packed again={.value=value};
+      switch(again) {
+        case Packed{<`b> .value=x}: return sizeof(`b)==width ? 0 : 3;
+        default: return 4;
+      }
+    case Packed{<`a> .value=x}: return sizeof(`a)==width ? 0 : 5;
+  }
+}
+static unsigned get_width(union Packed box) {
+  switch (box) {
+    case Packed{<`a> .p=p}: return sizeof(`a);
+    case Packed{<`a> .value=x}: return sizeof(`a);
+  }
+}
+int main(int argc,string_t ?argv) {
+  union Packed a={.p=&small};
+  union Packed b={.p=&wide};
+  if(get_width(a)!=4 || get_width(b)!=8) return 1;
+  if(inspect(a,4) || inspect(b,8) || inspect(global_box,4)) return 2;
+  if(inspect(pack(&small),4) || inspect(pack(&wide),8)) return 3;
+  a=b;
+  if(inspect(a,8)) return 4;
+  union Packed value={.value=0x1234567800000012L};
+  return inspect(value,8);
+}

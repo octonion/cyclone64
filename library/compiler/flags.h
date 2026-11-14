@@ -153,7 +153,7 @@ namespace Flags {
   // when set to true, does a better job in vcgen for calculating
   // loop invariants.
   extern bool better_widen;
-  extern bool native_layouts; // experimental reified boxed-type memory layout
+  extern bool native_layouts; // native boxed-type memory layout; default enabled
 }  // namespace Flags
 
 #endif

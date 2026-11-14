@@ -1,0 +1,44 @@
+#include "cyclone/library/std/core.h"
+using Core;
+struct Ref<`a::B> { `a @p; };
+datatype RefValue<`a::B> { RefValue(`a @); };
+static int small=-17;
+static long wide=0x1234567800000012L;
+static struct Ref<int> global={.p=&small};
+static int check(`a::B @`H x, `a @`H y : regions(`a)<=`H) {
+  struct Ref<`a> box={.p=x};
+  struct Ref<`a> @alias=&box;
+  if(box.p!=x || alias->p!=x) return 1;
+  if((box.p=y)!=y || box.p!=y) return 2;
+  alias->p=x;
+  if(box.p!=x) return 3;
+  let slot=&box.p;
+  *slot=y;
+  return box.p==y ? 0 : 4;
+}
+int main(int argc,string_t ?argv) {
+  static int x=29;
+  struct Ref<int> box={.p=&small};
+  struct Ref<int> @alias=&box;
+  if(*box.p!=-17 || *global.p!=-17 || *alias->p!=-17) return 1;
+  if((box.p=&x)!=&x || *box.p!=29) return 2;
+  alias->p=&small;
+  if(*box.p!=-17) return 3;
+  let slot=&box.p;
+  *slot=&x;
+  if(*box.p!=29) return 4;
+  let Ref{extracted}=box;
+  let &Ref{pointed}=alias;
+  if(extracted!=&x || pointed!=&x) return 7;
+  let RefValue(rp)=RefValue(&small);
+  if(rp!=&small || *rp!=-17) return 6;
+  let d=RefValue(&x);
+  let &RefValue(dp)=&d;
+  if(dp!=&x || *dp!=29) return 8;
+  switch(&d) {
+    case &RefValue(&29): break;
+    default: return 9;
+  }
+  static long y=0x4321876500000029L;
+  return check(&small,&x) || check(&wide,&y) ? 5 : 0;
+}

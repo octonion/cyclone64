@@ -179,6 +179,18 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
         let &$(ds, field_exp) = dles2->hd;
         let f                 = designatorlist_to_fieldname(ds);
         let field_dest = set_type(member_exp(deep_copy(dest), f, DL), (type_t)field_exp->topt);
+        // Array initializers can have a concrete element type while a generic
+        // aggregate declaration reserves erased word storage. Decay through
+        // void* before selecting the logical element view; Lower must not
+        // first assign the raw erased array to an incompatible typed pointer.
+        switch (compress((type_t)field_exp->topt)) {
+          case &ArrayType(ai):
+            let view = cstar_type(ai.elt_type, ai.tq);
+            field_dest->topt = cstar_type(void_type, empty_tqual(DL));
+            field_dest = set_type(cast_exp(view, field_dest, false, No_coercion, DL), view);
+            break;
+          default: break;
+        }
         remove_aggrs_exp(ctxt, Env(AggrField, field_dest, NULL), field_exp);
       }
       // note: we must preserve left-to-right since we're linearizing here

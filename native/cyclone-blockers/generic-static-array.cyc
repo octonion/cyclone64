@@ -1,0 +1,26 @@
+#include "cyclone/library/std/core.h"
+using Core;
+struct StaticElements<`a::B> { `a data[3]; int marker; };
+static struct StaticElements<int> global={.data={11,-29,37},.marker=77};
+static struct StaticElements<long> wide={.data={0x1234567800000011L,-29L,37L},.marker=123};
+struct StaticMatrix<`a::B> { `a data[2][3]; int marker; };
+static struct StaticMatrix<int> matrix={.data={{1,-2,3},{4,5,6}},.marker=81};
+static struct StaticElements<unsigned> bits={.data={0xffffffffU,0x80000000U,0x7fffffffU},.marker=83};
+static int one=1,two=2,three=3;
+static struct StaticElements<int @> pointers={.data={&one,&two,&three},.marker=85};
+int main(int argc,string_t ?argv) {
+  static struct StaticElements<int> local={.data={41,-43,47},.marker=79};
+  if(global.data[0]!=11 || global.data[1]!=-29 || global.data[2]!=37 || global.marker!=77) return 1;
+  if(local.data[0]!=41 || local.data[1]!=-43 || local.data[2]!=47 || local.marker!=79) return 2;
+  if(wide.data[0]!=0x1234567800000011L || wide.data[1]!=-29L || wide.data[2]!=37L || wide.marker!=123) return 3;
+  if(matrix.data[0][1]!=-2 || matrix.data[1][0]!=4 || matrix.data[1][2]!=6 || matrix.marker!=81) return 5;
+  if(bits.data[0]!=0xffffffffU || bits.data[1]!=0x80000000U || bits.data[2]!=0x7fffffffU || bits.marker!=83) return 6;
+  if(*pointers.data[0]!=1 || *pointers.data[1]!=2 || *pointers.data[2]!=3 || pointers.marker!=85) return 7;
+  struct StaticMatrix<int> automatic={.data={{7,8,9},{10,11,12}},.marker=87};
+  int ?row=automatic.data[1];
+  row[1]=-13;
+  if(automatic.data[0][2]!=9 || automatic.data[1][1]!=-13 || automatic.data[1][2]!=12 || automatic.marker!=87) return 8;
+  int ?p=global.data;
+  p[1]=53;
+  return global.data[1]==53 && global.data[2]==37 && global.marker==77 ? 0 : 4;
+}

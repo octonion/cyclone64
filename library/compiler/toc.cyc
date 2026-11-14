@@ -813,6 +813,77 @@ static exp_t native_layout_size(toc_context_t ctxt, type_t t) {
   }
   return set_type(sizeoftype_exp(typ_to_c(ctxt, t), DL), ulong_type);
 }
+// Flatten a constant aggregate-array initializer in logical element order.
+// Missing entries are zero, including the tails of nested rows.
+static list_t<exp_t> native_static_elements(type_t t, exp_opt_t value) {
+  switch (compress(t)) {
+    case &ArrayType(ai):
+      if (ai.num_elts == NULL) {
+        Warn::err2(DL, "native static array needs a constant bound");
+        return NULL;
+      }
+      let $(count, known) = Evexp::eval_const_uint_exp((exp_t)ai.num_elts);
+      if (!known) {
+        Warn::err2(DL, "native static array needs a constant bound");
+        return NULL;
+      }
+      list_t<$(list_t<designator_t>, exp_t) @> items = NULL;
+      if (value != NULL) switch (value->r) {
+        case &UnresolvedMem_e(_, es): items = es; break;
+        case &Array_e(es): items = es; break;
+        default:
+          Warn::err2(value->loc, "unsupported native static array initializer");
+          return NULL;
+      }
+      list_t<exp_t> result = NULL;
+      for (unsigned i = 0; i < count; i++) {
+        exp_opt_t item = NULL;
+        if (items != NULL) { item = (*items->hd)[1]; items = items->tl; }
+        result = imp_append(result, native_static_elements(ai.elt_type, item));
+      }
+      return result;
+    default:
+      return list(value != NULL ? (exp_t)value : cast_it(t, set_type(uint_exp(0, DL), uint_type)));
+  }
+}
+
+// The named generic C declaration reserves pointer words. Static concrete
+// int arrays must pack two 32-bit values into each LP64 word, just as dynamic
+// initializers pack their logical prefix. Brace elision covers nested arrays.
+static exp_t native_static_array(toc_context_t ctxt, type_t stored, exp_t value) {
+  type_t leaf = (type_t)value->topt;
+  while (is_array_type(leaf)) {
+    let &ArrayType(ai) = compress(leaf);
+    leaf = ai.elt_type;
+  }
+  bool narrow = false;
+  switch (compress(leaf)) {
+    case &AppType(&IntCon(_, Int_sz), _): narrow = sizeof(void *) == 8; break;
+    default: break;
+  }
+  let values = native_static_elements((type_t)value->topt, value);
+  list_t<$(list_t<designator_t>, exp_t) @> words = NULL;
+  while (values != NULL) {
+    let word = values->hd;
+    values = values->tl;
+    if (narrow) {
+      let first = cast_it(ulong_type, cast_it(uint_type, word));
+      let second = cast_it(ulong_type, set_type(uint_exp(0, DL), uint_type));
+      if (values != NULL) {
+        second = cast_it(ulong_type, cast_it(uint_type, values->hd));
+        values = values->tl;
+      }
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+      let tmp = first; first = second; second = tmp;
+#endif
+      second = set_type(prim2_exp(Bitlshift, second, set_type(uint_exp(32, DL), uint_type), DL), ulong_type);
+      word = set_type(prim2_exp(Bitor, first, second, DL), ulong_type);
+    }
+    words = new List(new $(NULL, cast_it(void_star_type(ctxt), word)), words);
+  }
+  return set_type(unresolvedmem_exp(NULL, imp_rev(words), value->loc), stored);
+}
+
 exp_t native_layout_store(toc_context_t ctxt, exp_t address, exp_t width, exp_t value) {
   let vp = void_star_type(ctxt);
   return set_type(fncall_exp_dl(_cyc_layout_store_e, cast_it(vp, address),
@@ -1475,26 +1546,44 @@ static exp_t native_layout_bind(env_t nv, type_t target, exp_t value, list_t<exp
   return cast_it(target, set_type(fncall_exp(_cyc_callback_bind_e, args, DL), p));
 }
 
-static type_t callback_field_type(toc_context_t ctxt, type_t aggregate, field_name_t name) {
+static type_t aggregate_field_type(toc_context_t ctxt, type_t aggregate, field_name_t name) {
   switch (compress(aggregate)) {
-    case &SubsetType(vd, ...): return callback_field_type(ctxt, vd->type, name);
+    case &SubsetType(vd, ...): return aggregate_field_type(ctxt, vd->type, name);
     case &AppType(&AggrCon(info), _):
       let ad = get_known_aggrdecl(info);
       if (ad->impl == NULL) return void_type;
       let field = lookup_field(ad->impl->fields, name);
       if (field == NULL) return void_type;
-      let t = typ_to_c(ctxt, field->type);
-      let ft = compress(t);
-      if (is_pointer_type(ft)) ft = compress(pointer_elt_type(ft));
-      return is_function_type(ft) ? t : void_type;
+      return typ_to_c(ctxt, field->type);
     default: return void_type;
   }
 }
 
-static void callback_field_read(env_t nv, exp_t e, type_t aggregate, field_name_t name,
+static void aggregate_field_read(env_t nv, exp_t e, type_t aggregate, field_name_t name,
                                 type_t requested) {
-  let stored = callback_field_type(nv->ctxt, aggregate, name);
+  let stored = aggregate_field_type(nv->ctxt, aggregate, name);
   if (is_void_type(stored)) return;
+  bool array_field = is_array_type(stored);
+  if (array_field) {
+    let &ArrayType(ai) = compress(stored);
+    stored = cstar_type(ai.elt_type, ai.tq);
+  }
+  let ft = compress(stored);
+  if (is_pointer_type(ft)) ft = compress(pointer_elt_type(ft));
+  if (!is_function_type(ft)) {
+    // Erased pointer fields occupy one pointer slot. Preserve an lvalue
+    // view when assigning or taking its address; array fields instead decay
+    // to the logical element pointer without reading a pointer from storage.
+    if (is_pointer_type(stored) && is_pointer_type(requested) &&
+        Tcutil::typecmp(stored, requested) != 0) {
+      let value = set_type(deep_copy(e), stored);
+      if (in_lhs(nv) && !array_field) {
+        let address = set_type(address_exp(value, DL), cstar_type(stored, mt_tq));
+        *e = *set_type(deref_exp(cast_it(cstar_type(requested, mt_tq), address), DL), requested);
+      } else *e = *cast_it(requested, value);
+    }
+    return;
+  }
   e->topt = stored;
   if (!in_lhs(nv)) {
     let adapter = callback_conversion(nv, requested, deep_copy(e));
@@ -3105,7 +3194,7 @@ void exp_to_c(env_t nv, exp_t e) {
         e->r     = cast_it_r(t, e2);
         e->topt  = t;
       }
-      if (!is_poly) callback_field_read(nv, e, e1_cyc_type, f, t);
+      if (!is_poly && (!is_tagged || is_read)) aggregate_field_read(nv, e, e1_cyc_type, f, t);
       break;
     case &AggrArrow_e(e1, f, is_tagged, is_read):
       bool is_poly = is_poly_project(e);  // decide before mutating e
@@ -3135,7 +3224,7 @@ void exp_to_c(env_t nv, exp_t e) {
       } else if (is_poly) {
         e->topt = void_star_type(nv->ctxt);
       }
-      if (!is_poly) callback_field_read(nv, e, ta, f, t);
+      if (!is_poly && (!is_tagged || is_read)) aggregate_field_read(nv, e, ta, f, t);
       break;
     case &Deref_e(e1):
       did_inserted_checks = true;
@@ -3293,7 +3382,14 @@ void exp_to_c(env_t nv, exp_t e) {
               exp_to_c(nv, fieldexp);
               let adapter = callback_conversion(nv, typ_to_c(nv->ctxt, aggrfield->type), deep_copy(fieldexp));
               if (adapter != NULL) *fieldexp = *adapter;
-              // warning avoidance
+              // Field declarations retain erased pointer types. Adapt callbacks
+              // first, then make object-pointer representation casts explicit.
+              let stored_type = typ_to_c(nv->ctxt, aggrfield->type);
+              if (is_pointer_type(stored_type) &&
+                  is_pointer_type((type_t)fieldexp->topt) &&
+                  Tcutil::typecmp(stored_type, (type_t)fieldexp->topt) != 0) {
+                *fieldexp = *cast_it(stored_type, deep_copy(fieldexp));
+              }
               if (is_void_star_or_boxed_tvar(aggrfield->type) &&
                   !is_pointer_or_boxed_tvar((type_t)fieldexp->topt)) {
                 let t          = typ_to_c(nv->ctxt, aggrfield->type);
@@ -3388,8 +3484,15 @@ void exp_to_c(env_t nv, exp_t e) {
           let fieldexp_type       = (type_t)fieldexp->topt;
           let fieldtyp            = field->type;
           exp_to_c(nv, fieldexp);
-          if (is_void_star_or_boxed_tvar(fieldtyp) && !is_void_star_or_boxed_tvar(fieldexp_type))
-            fieldexp->r = cast_it_r(void_star_type(nv->ctxt), deep_copy(fieldexp));
+          let stored_type = typ_to_c(nv->ctxt, fieldtyp);
+          if (Flags::native_layouts && is_array_type(fieldtyp) && native_layout_dependent(fieldtyp))
+            *fieldexp = *native_static_array(nv->ctxt, stored_type, fieldexp);
+          let adapter = callback_conversion(nv, stored_type, deep_copy(fieldexp));
+          if (adapter != NULL) *fieldexp = *adapter;
+          if ((is_void_star_or_boxed_tvar(fieldtyp) && !is_void_star_or_boxed_tvar(fieldexp_type)) ||
+              (is_pointer_type(stored_type) && is_pointer_type((type_t)fieldexp->topt) &&
+               Tcutil::typecmp(stored_type, (type_t)fieldexp->topt) != 0))
+            *fieldexp = *cast_it(stored_type, deep_copy(fieldexp));
           // for tagged unions, must insert tag here
           int i               = get_member_offset(sd, field->name);
           exp_t field_tag_exp = set_type(signed_int_exp(i, 0), sint_type);
@@ -3408,6 +3511,10 @@ void exp_to_c(env_t nv, exp_t e) {
                 let fieldtyp            = typ_to_c(nv->ctxt, field->type);
                 let fieldexp_typ        = typ_to_c(nv->ctxt, (type_t)fieldexp->topt);
                 exp_to_c(nv, fieldexp);
+                if (Flags::native_layouts && is_array_type(field->type) && native_layout_dependent(field->type)) {
+                  *fieldexp = *native_static_array(nv->ctxt, fieldtyp, fieldexp);
+                  fieldexp_typ = fieldtyp;
+                }
                 let adapter = callback_conversion(nv, fieldtyp, deep_copy(fieldexp));
                 if (adapter != NULL) *fieldexp = *adapter;
                 // must cast when the types don't match up -- except when
@@ -3443,8 +3550,10 @@ void exp_to_c(env_t nv, exp_t e) {
         exp_to_c(nv, cur_e);
         let adapter = callback_conversion(nv, field_typ, deep_copy(cur_e));
         if (adapter != NULL) *cur_e = *adapter;
-        if (is_void_star_or_boxed_tvar(field_typ) && !is_pointer_or_boxed_tvar(cur_e_typ))
-          cur_e->r = cast_it(field_typ, deep_copy(cur_e))->r;
+        if ((is_void_star_or_boxed_tvar(field_typ) && !is_pointer_or_boxed_tvar(cur_e_typ)) ||
+            (is_pointer_type(field_typ) && is_pointer_type((type_t)cur_e->topt) &&
+             Tcutil::typecmp(field_typ, (type_t)cur_e->topt) != 0))
+          *cur_e = *cast_it(field_typ, deep_copy(cur_e));
       }
       // create the tag initializer
       let tag_exp = tud->is_extensible
@@ -3635,6 +3744,19 @@ static $(bool used, var_t, var_t, switch_clause_t) @`r
   return rnew(r) $(false, fresh_label(ctxt), fresh_label(ctxt), sc);
 }
 
+// Pattern projections must describe the declaration's erased C type before
+// converting to the instantiated view, otherwise Lower invents an incorrectly
+// typed temporary between the member access and its use.
+static exp_t pattern_field_view(toc_context_t ctxt, type_t declared, type_t requested, exp_t field) {
+  let stored = typ_to_c_array(ctxt, declared);
+  set_type(field, stored);
+  if ((is_void_star_or_boxed_tvar(declared) ||
+       (is_pointer_type(stored) && is_pointer_type(requested))) &&
+      Tcutil::typecmp(stored, requested) != 0)
+    return cast_it(requested, field);
+  return field;
+}
+
 using Tcpat {
   // given a path from the match compiler and a root expression v,
   // generate code for extracting the value.
@@ -3672,15 +3794,17 @@ using Tcpat {
               case &DatatypeField(tud, tuf, i, res_type2):
                 ps = ps->tl;
                 v  = cast_it(cstar_type(strctq(collapse_qvars(ctxt, tuf->name, tud->name)), mt_tq), v);
-                v  = set_type(aggrarrow_exp(v, fieldname(i + 1), DL), typ_to_c_array(ctxt, res_type2));
+                v = pattern_field_view(ctxt, (*List::nth(tuf->typs, i))[1],
+                                       typ_to_c_array(ctxt, res_type2), aggrarrow_exp(v, fieldname(i + 1), DL));
                 continue;
               default:
                 break;
             }
           v = set_type(deref_exp(v, DL), typ_to_c_array(ctxt, res_type));
           break;
-        case &DatatypeField(_, _, i, res_type):
-          v = set_type(member_exp(v, fieldname(i + 1), DL), typ_to_c_array(ctxt, res_type));
+        case &DatatypeField(_, tuf, i, res_type):
+          v = pattern_field_view(ctxt, (*List::nth(tuf->typs, i))[1],
+                                 typ_to_c_array(ctxt, res_type), member_exp(v, fieldname(i + 1), DL));
           break;
         case &AggrField(at, tagged, f, res_type):
           v = member_exp(v, f, DL);
@@ -4021,12 +4145,8 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
         let t2c        = typ_to_c_array(ctxt, t2);
         let rarrow_exp = aggrarrow_exp(deep_copy(new_rpath), fieldname(cnt), DL);
         let larrow_exp = aggrarrow_exp(deep_copy(lpath), fieldname(cnt), DL);
-        set_type(rarrow_exp, t2c);
-        set_type(larrow_exp, t2c);
-        if (is_void_star_or_boxed_tvar(typ_to_c(ctxt, tuf_typ))) {
-          rarrow_exp = cast_it(t2c, rarrow_exp);
-          larrow_exp = cast_it(t2c, larrow_exp);
-        }
+        rarrow_exp = pattern_field_view(ctxt, tuf_typ, t2c, rarrow_exp);
+        larrow_exp = pattern_field_view(ctxt, tuf_typ, t2c, larrow_exp);
         s = seq_stmt_opt(
             s, extract_pattern_vars(ctxt, rgn, nv, newdecls, prevdecls, larrow_exp, rarrow_exp, p2));
       }
@@ -4034,17 +4154,18 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
         s = decl_stmt(new_decl(new Var_d(new_vd), 0), s, 0);
       return s;
 
-    case &Datatype_p(_, _, ps, _):
+    case &Datatype_p(_, tuf, ps, _):
       stmt_opt_t s = NULL;
-      for (int cnt = 1; ps != NULL; ps = ps->tl, ++cnt) {
+      let fields = tuf->typs;
+      for (int cnt = 1; ps != NULL; ps = ps->tl, fields = fields->tl, ++cnt) {
         let p2 = ps->hd;
         if (p2->r == &Wild_p_val)
           continue;
         let t2  = (type_t)p2->topt;
         let t2c = typ_to_c_array(ctxt, t2);
         let f   = fieldname(cnt);
-        let lp  = set_type(member_exp(lpath, f, DL), t2c);
-        let rp  = set_type(member_exp(rpath, f, DL), t2c);
+        let lp = pattern_field_view(ctxt, (*fields->hd)[1], t2c, member_exp(lpath, f, DL));
+        let rp = pattern_field_view(ctxt, (*fields->hd)[1], t2c, member_exp(rpath, f, DL));
         s       = seq_stmt_opt(s, extract_pattern_vars(ctxt, rgn, nv, newdecls, prevdecls, lp, rp, p2));
       }
       return s;
@@ -4112,7 +4233,9 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
         }
         lmemexp->topt = typ_to_c_array(ctxt, ftype);
         rmemexp->topt = typ_to_c_array(ctxt, ftype);
-        if (is_void_star_or_boxed_tvar(ftype)) {
+        if (is_void_star_or_boxed_tvar(ftype) ||
+            (is_pointer_type((type_t)rmemexp->topt) && is_pointer_type(t2c) &&
+             Tcutil::typecmp((type_t)rmemexp->topt, t2c) != 0)) {
           lmemexp = cast_it(t2c, lmemexp);
           rmemexp = cast_it(t2c, rmemexp);
         } else if (is_array_type(ftype)) {

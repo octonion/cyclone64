@@ -4,21 +4,24 @@ Cyclone is a safe dialect of C. It is designed to prevent buffer overflows, form
 
 This repository contains the source code for the Cyclone compiler, a self-hosting, source-to-source compiler that translates Cyclone code into C.
 
-## Build Instructions
+## Native 64-bit build
 
-The project uses [Bazel](https://bazel.build) for its build system.
-
-To build the entire project:
-
-```bash
-bazel build //cyclone/...
+```sh
+make all
+make check
+make install PREFIX="$HOME/.local"
 ```
 
-To run the test suite:
+The Make interface builds Banshee64 independently and bootstraps Cyclone64 from
+tracked sources. It installs the `cyclone64` compile/link driver, matching
+runtime and standard library, Banshee archive, public headers, and pkg-config
+metadata. Use `DESTDIR` for staged installations. See
+[native/README.md](native/README.md) for dependencies, overrides and validation.
 
-```bash
-bazel test //testsuite/...
-```
+GCC selection and architecture detection are automatic; `CC`, `LIBC_CC`, `ARCH`,
+`BUILD`, `CFLAGS`, `CPPFLAGS`, `LDFLAGS`, `AR` and `JOBS` are explicit overrides.
+The older Bazel files remain in the repository; the Make path is the validated
+native LP64 build.
 
 ## Project Structure
 

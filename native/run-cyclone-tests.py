@@ -64,7 +64,7 @@ for src in sorted(pathlib.Path(a.probe_dir).glob('*.cyc')):
     if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue
     q = run([compiler, *shlex.split(a.compiler_flags), '-o', generated, pre], src.stem + '-translate')
     if q.returncode or not generated.is_file(): results.append((src.stem, f'TRANSLATE FAIL ({q.returncode})')); continue
-    q = run([a.cc, '-std=gnu11', '-fno-strict-aliasing', *shlex.split(a.cflags), '-I'+a.runtime_include, generated, 'native/cyclone-tests/abi-helper.c', *objects, *runtime_libs(build), '-o', out / src.stem], src.stem + '-link')
+    q = run([a.cc, '-std=gnu11', '-fno-strict-aliasing', *shlex.split(a.cflags), '-I'+a.runtime_include, generated, 'native/cyclone-tests/abi-helper.c', *objects, *shlex.split(os.environ.get('LDFLAGS','')), *runtime_libs(build), '-o', out / src.stem], src.stem + '-link')
     if q.returncode: results.append((src.stem, 'LINK FAIL')); continue
     q = run([out / src.stem], src.stem + '-run')
     results.append((src.stem, 'PASS' if q.returncode == 0 else f'RUN FAIL ({q.returncode})'))

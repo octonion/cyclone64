@@ -1,5 +1,28 @@
 Banshee64 / Cyclone64 native candidates — 2026-11-14
 
+UNIFIED MAKE BUILD / INSTALLATION
+The root Makefile now provides all, check, install and clean. Clean GCC 15 native
+and Clang 21 -march=x86-64 builds pass with 81/81 bootstrap convergence. Both pass
+all Banshee, Cyclone, runtime and compiler checks through make check. Both
+installed drivers pass 30 executable probes, stdio, preprocessing, generated-C,
+compile-only/object linkage and pkg-config client tests. Staged installation,
+prefix relocation and paths containing spaces are verified. No-op builds,
+configuration-change rejection and clean ownership guards are verified.
+
+Current unified artifacts (relative to this repository):
+  build/unified-verify/lib/libbanshee64.a
+  build/unified-verify/lib/libcyclone64.a
+  build/unified-verify/bin/cyclone64-compiler
+Installed GCC driver:
+  build/install-staging/opt/cyclone64/bin/cyclone64
+Clang build/install:
+  build/unified-clang and build/clang-install
+Logs: native/logs/unified-*.log and build/{unified-verify,unified-clang}/logs/.
+CC selects all C compilation; LIBC_CC separately selects GCC preprocessing for
+the legacy libc-declaration parser. ARCH remains overridable throughout the
+bootstrap. The normal installed driver defaults to native layouts and refuses
+legacy layouts with the native runtime. See README.md for the Make interface.
+
 ASSESSMENT
 Satisfactory native LP64 candidates for the tested scope on seymour. No known
 remaining conversion blocker in the validated suites. This is a candidate
@@ -7,7 +30,7 @@ assessment, not exhaustive verification of every historical language/library
 feature. Source and tests are isolated on native-lp64-seymour.
 Host: Ryzen 9 5950X, x86-64 Kubuntu. GCC 15.2.0, -O2 -g -march=native.
 Historical upstream: c19c449365671fa10acad6307a95ffffae86dc69.
-Final implementation commit: c0dc716 (documentation/verification commit follows).
+Compiler-port implementation commit: c0dc716; Make integration is recorded later.
 
 CANDIDATES (paths relative to the main repository)
 Banshee: ../cyclone-candidate-clean/native/build/libbanshee64.a

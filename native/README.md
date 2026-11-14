@@ -9,6 +9,88 @@ See [STATUS.txt](STATUS.txt) for the validated candidate paths and scope, and
 convention. Historical failed baselines are retained in logs and Git history.
 A successful bootstrap alone does not establish correct LP64 semantics.
 
+## Unified Make interface
+
+From the repository root:
+
+```sh
+make all
+make check
+make install PREFIX="$HOME/.local"
+```
+
+`make all` builds both archives and the native compiler in `build/native`,
+regenerates bootstrap sources, and verifies 81-file self-bootstrap convergence.
+`make check` runs the Banshee regressions/region drivers, Cyclone diagnostics,
+literal rejections, native/layout probes, upstream suite, compiler units and
+runtime/collector checks. `make install` also compiles and runs small clients
+against the installed Cyclone and Banshee interfaces.
+
+Requirements: GNU Make, Python 3.9+ (also used by the installed driver), a native
+GCC installation, pkg-config, and development files for libbacktrace, libffi,
+OpenSSL/libcrypto and BDW-GC. Clang can compile all C objects through `CC`.
+The legacy glibc declaration parser uses GCC preprocessing for libc bindings;
+`LIBC_CC` selects that separate tool and defaults to the detected GCC. No package
+installation is performed by the build.
+
+```sh
+# Explicit compiler and portable x86-64 architecture; separate output tree.
+make BUILD=build/clang CC=clang-21 ARCH=-march=x86-64 JOBS=6 all check
+
+# Stage a conventional /opt prefix without writing to /opt.
+make install PREFIX=/opt/cyclone64 DESTDIR="$PWD/build/staging"
+
+# Verify all 30 executable native/layout probes using the installed driver.
+python3 native/check-install.py --prefix build/staging/opt/cyclone64 \
+  --out build/installed-checks
+```
+
+`PREFIX` (or lowercase `prefix`) defaults to `/usr/local`. `DESTDIR` is only a
+staging root; installed paths are relative to the installation, so the prefix
+can be relocated. Prefixes containing spaces are supported. Install creates:
+
+- `bin/cyclone64`: preprocessing, translation, C compilation and linking.
+- `libexec/cyclone64/cyclone64-compiler`: the native translator.
+- `lib/libbanshee64.a`, `lib/libcyclone64.a` and `lib/pkgconfig/*.pc`.
+- `include/banshee64`, `include/cyclone64`, and Cyclone-language headers and
+  configuration under `share/cyclone64`.
+
+Basic installed use:
+
+```sh
+cyclone64 hello.cyc -o hello
+cyclone64 module.cyc -c -o module.o
+cyclone64 module.cyc --emit-c -o module.c
+cyclone64 hello.cyc -E -o hello.cyp
+cc client.c $(pkg-config --cflags --libs banshee64) -o client
+```
+
+The driver accepts `.cyc`, preprocessed `.cyp`, `.c`, `.o` and `.a` inputs,
+`-I/-D/-U/-L/-l`, C compiler flags, and `--cyclone-flag=--option` for translator
+options. `--cc`, `--arch`, and the `CC/ARCH/CFLAGS/CPPFLAGS/LDFLAGS` environment
+variables override the installed compiler defaults. It is a native driver with
+this documented option set, not a replacement for every historical driver flag.
+Both public pkg-config interfaces select GNU C11; generated C also needs
+`-fno-strict-aliasing`. Add the installed `lib/pkgconfig` directory to
+`PKG_CONFIG_PATH` for nonstandard prefixes. Static Cyclone C linkage uses
+`pkg-config --cflags --libs --static cyclone64`.
+
+Build overrides: `CC`, `LIBC_CC`, `AR`, `ARCH`, `CFLAGS`, `CPPFLAGS`, `LDFLAGS`,
+`BUILD`, `NATIVE_GC` and `JOBS`. `JOBS` controls inner builds; otherwise the
+requested `make -jN` count is used, with a bounded CPU-based default.
+`NATIVE_GC=system` is the normal default. `nogc` is for focused allocation tests,
+not general programs that require collection.
+
+Repeat compiler/flag overrides on later invocations, or export them. A changed
+configuration requires a fresh `BUILD` or `make clean`; the build refuses to mix
+objects. Generated sources and logs are isolated under `BUILD/src` and
+`BUILD/logs`. Repeating an unchanged build is a no-op. Compiler/runtime source
+changes rebuild the bootstrap pipeline; test/documentation-only changes do not.
+This stage-level rebuilding is conservative because there is no complete Cyclone
+include-dependency scanner. `make clean` removes only a directory marked as a
+managed build belonging to this checkout. Existing manual builds under `native/`
+remain separate. The low-level workflows below remain available for diagnosis.
+
 ## Independent Banshee build
 
 Run from the repository root:

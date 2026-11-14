@@ -12,6 +12,7 @@
 #include <stddef.h>
 #include <limits.h>
 #include <stdarg.h>
+#include <unistd.h>
 
 // libffi closures use mmap, outside LeakSanitizer's allocation graph. Each
 // cached closure is a live root and owns trampoline-table pointers in malloc
@@ -49,6 +50,8 @@ struct cb_adapter {
   unsigned long *bound;
 };
 static struct cb_adapter *cb_cache;
+struct cb_reserved { struct cb_reserved *next; ffi_closure *closure; };
+static struct cb_reserved *cb_reserved_entries;
 static pthread_mutex_t cb_lock = PTHREAD_MUTEX_INITIALIZER;
 static void *cb_adapt(void *, const char *, const char *);
 
@@ -61,6 +64,26 @@ static void *cb_alloc(size_t n) {
   if (!p) { _throw_badalloc_fn(__FILE__,__LINE__); cb_error("allocation handler returned"); }
   memset(p,0,n);
   return p;
+}
+// Clang's function sanitizer reads an eight-byte prefix before an indirect
+// target. libffi's static trampoline tables can return the first byte of a
+// mapped executable page, whose prefix may be unmapped. Reserve those entries
+// instead of exposing them. Keep the allocation at its original address (the
+// writable and executable mappings need not even have the same layout).
+static ffi_closure *cb_closure_allocate(void **code) {
+  long page_size=sysconf(_SC_PAGESIZE);
+  if(page_size<8) cb_error("cannot determine executable page size");
+  for(;;) {
+    ffi_closure *closure=ffi_closure_alloc(sizeof *closure,code);
+    if(!closure) return NULL;
+    if(__lsan_register_root_region) __lsan_register_root_region(closure,sizeof *closure);
+    if((uintptr_t)*code % (unsigned long)page_size >= 8) return closure;
+    struct cb_reserved *reserved=cb_alloc(sizeof *reserved);
+    reserved->closure=closure;
+    pthread_mutex_lock(&cb_lock);
+    reserved->next=cb_reserved_entries; cb_reserved_entries=reserved;
+    pthread_mutex_unlock(&cb_lock);
+  }
 }
 static char *cb_copy(const char *p, size_t n) {
   char *r=cb_alloc(n+1); memcpy(r,p,n); return r;
@@ -238,10 +261,9 @@ static void *cb_adapt_bound(void *fn,const char *from_text,const char *to_text,
   a->bound_count=bound_count;
   if(bound_count) { a->bound=cb_alloc(bound_count*sizeof *bound); memcpy(a->bound,bound,bound_count*sizeof *bound); }
   a->original=fn;
-  a->closure=ffi_closure_alloc(sizeof *a->closure,&a->code);
+  a->closure=cb_closure_allocate(&a->code);
   if(!a->closure || ffi_prep_closure_loc(a->closure,&a->to->cif,cb_invoke,a,a->code)!=FFI_OK)
     cb_error("closure allocation failed");
-  if(__lsan_register_root_region) __lsan_register_root_region(a->closure,sizeof *a->closure);
   pthread_mutex_lock(&cb_lock);
   for(struct cb_adapter *p=cb_cache;p;p=p->next)
     if(p->original==fn && cb_bound_equal(p,bound_count,bound) && !strcmp(p->from->signature,from_text) && !strcmp(p->to->signature,to_text)) {
@@ -317,6 +339,11 @@ void _cyc_callback_shutdown(void) {
     struct cb_adapter *a=cb_cache; cb_cache=a->next;
     if(a->closure) cb_closure_free(a->closure);
     cb_free_type(a->from); cb_free_type(a->to); GC_free(a->bound); GC_free(a);
+  }
+  while(cb_reserved_entries) {
+    struct cb_reserved *r=cb_reserved_entries;
+    cb_reserved_entries=r->next;
+    cb_closure_free(r->closure); GC_free(r);
   }
   pthread_mutex_unlock(&cb_lock);
 }

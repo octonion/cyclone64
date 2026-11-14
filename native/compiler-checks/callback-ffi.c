@@ -89,6 +89,13 @@ int main(int argc,char **argv) {
   void *different=_cyc_callback_bind((void *)layout_pair,"FL(LLL)","FL(L)",2,8UL,4UL);
   CHECK(((unsigned long (*)(unsigned long))different)(3)==843);
   CHECK(pair!=different);
+  // Exercise new executable pages, including a first trampoline at a page
+  // boundary. Clang's function sanitizer reads metadata before each target.
+  for(unsigned long i=1;i<=2048;++i) {
+    void *many=_cyc_callback_bind((void *)layout_pair,"FL(LLL)","FL(L)",2,i,8UL);
+    CHECK((uintptr_t)many % (unsigned long)sysconf(_SC_PAGESIZE) >= 8);
+    CHECK(((unsigned long (*)(unsigned long))many)(3)==i*100+83);
+  }
   pthread_t ts[4]; for(int i=0;i<4;++i) CHECK(!pthread_create(&ts[i],NULL,thread,NULL));
   for(int i=0;i<4;++i) CHECK(!pthread_join(ts[i],NULL));
   _cyc_callback_register_static((void *)static_negate,(void *)negate,"Fi(i)","Fp1:v(p1:v)");

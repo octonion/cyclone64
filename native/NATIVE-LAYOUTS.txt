@@ -58,3 +58,19 @@ Not yet satisfactory:
 
 The earlier native/experimental/polyref wrapper prototype remains isolated.
 The implemented approach keeps native addresses and reifies widths instead.
+
+Callback page-boundary correction:
+The first sanitizer self-bootstrap found a libffi static trampoline exactly at
+an executable page boundary. Clang's indirect-function check reads eight bytes
+before the target, which faulted when the preceding page was unmapped. Runtime
+allocation now reserves these first entries and exposes later entries on the
+same page, retaining libffi's original writable/code addresses. Reserved slots
+are freed on explicit shutdown and registered as live LSan roots while held.
+No sanitizer is disabled. A 2,048-closure stress check verifies safe placement,
+correct bound calls, shutdown and live-cache leak handling. The deliberate
+73-byte leak is still detected. layout-asan3 then completed all 81 source
+translations and linked under the fully instrumented layout-aware compiler.
+Logs: layout-closure-page-*.log, layout-asan3.log. Original failure is preserved
+in native/bootstrap/layout-asan2/library/compiler/tcdecl-translate.log.
+Reference: https://github.com/libffi/libffi/blob/v3.5.2/src/closures.c
+and https://github.com/libffi/libffi/blob/v3.5.2/src/x86/ffi64.c

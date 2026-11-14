@@ -1,81 +1,56 @@
-Native generic memory layout experiment (2026-11-14)
-==================================================
+Native LP64 generic layout convention
+====================================
 
-Enable explicitly with --native-layouts. This is a whole-program calling
-convention: do not mix standard-library/compiler objects generated with and
-without it. The default remains the previous bootstrap convention until the
-remaining failures are fixed and the new convention is fully validated.
+Source-built Cyclone64 now defaults to native layouts. --native-layouts remains
+an explicit spelling; --legacy-layouts selects the bootstrap-only convention.
+The tracked stage0 compiler retains its old convention. Rebuild every compiler,
+standard-library and application object together when changing conventions.
+Generated native C defines CYC_NATIVE_LAYOUTS for the matching runtime entry points.
 
-Boxed type parameters gain an unsigned-long memory-width argument. Generic
-values still use canonical register words; references retain their original
-native C addresses. Loads/stores use memcpy at the actual width (4-byte int,
-8-byte long/pointer), and fat-pointer bounds/stride and allocations use that
-same width. Nested and escaping references preserve object identity. Generic
-stack arrays currently reserve word-sized storage but initialize/use a packed
-prefix and expose the logical sizeof; this storage policy needs further audit.
+Boxed type parameters carry an unsigned-long memory-width argument. Generic
+values use canonical register words; references retain native C addresses.
+Loads/stores use memcpy at the actual width (4-byte int, 8-byte long/pointer).
+Allocation, sizeof, pointer strides and bounds use the same logical width.
+Nested and escaping references preserve address identity.
 
-First-class instantiations bind layout arguments in libffi closures. Static
-function initializers use generated wrappers with registered bound arguments.
-Closure cache keys include bound arguments, including when re-adapting a
-callback. The native C open_region implementation has a separate entry point
-selected by CYC_NATIVE_LAYOUTS in generated C. Existing runtime ABI is retained.
+Generic stack and aggregate arrays reserve erased word capacity and use a packed
+logical prefix. Nested rows use logical strides. Array-member lowering preserves
+the original aggregate's storage. Static aggregate int arrays pack their constant
+32-bit values into the reserved LP64 words; pointers and long values occupy a
+whole word. This is a native compiler convention, not a portable serialized format.
 
-Verified checkpoints:
-- layout-seed5: compiler built without the new calling convention, can emit it.
-- layout-full3, layout-full4: complete 81-source compiler/stdlib native builds.
-- layout-full3 runs all 16 existing native checks and the upstream suite.
-- layout-asan1: all compiler/stdlib sources instrumented with Clang 21
-  ASan/UBSan/function; 7 generic regressions plus a non-char zero-terminated
-  pointer regression pass, including exact malloc-backed runtime redzones.
-- Upstream suite passes with the instrumented translator/compiler/stdlib and
-  production BDW-GC runtime. BDW-GC disables ASan fake stacks as documented in
-  STATUS.txt; malloc-backed probes retain them. Leak checking remains enabled.
-- Bound callback unit covers 4/8-byte captures, multi-parameter captures,
-  adaptation round trips, cache discrimination, and static wrapper identity.
-  Normal and live-cache runs pass; the deliberate 73-byte leak is detected.
+Generic pointer fields distinguish declared erased C storage from instantiated
+views. Reads and initializers use explicit casts; assignments and address-taking
+preserve a typed lvalue view. Generated C requires -fno-strict-aliasing, as used
+by all native build/test drivers. Datatype constructors and pattern projections
+also need explicit storage/view conversions.
 
-Commands are retained in native/bootstrap/<stage>/commands.json and
-native/compiler-tests/<run>/commands.json. Relevant logs:
-  native/logs/layout-asan-generic.log
-  native/logs/layout-asan-upstream.log
-  native/logs/layout-native.log
-  native/logs/layout-callback-unit.log
-  native/logs/layout-callback-cache.log
-  native/logs/layout-callback-leak.log
+Existential structures and tagged unions carry width witnesses. Tagged-union
+members retain a leading tag followed by common width metadata and their value.
+Construction, pattern unpacking, copying and repacking preserve the witnesses.
+Generated witness field names avoid source-name collisions. Untagged existential
+values can be constructed and copied; unpacking their patterns was already
+unsupported in the historical ILP32 language implementation.
 
-Not yet satisfactory:
-- Existential struct layouts are now restored: constructors store metadata,
-  pattern unpacking captures it, and repacking/forwarding preserve it. The
-  expanded test covers 4/8-byte values, nested patterns, static construction,
-  generic factories and callbacks. layout-exist-full passes these and upstream
-  tests with ASan/UBSan/function. Existential unions remain unsupported.
-- layout-full3 vs layout-full4 agrees for 80/81 generated C files. printf.c
-  differs in one bounds-check elimination decision and consequent temp names.
-  Repeating printf translation with layout-full4 produces the other variant.
-  Do not claim deterministic convergence for the new convention yet.
-- Wider audit still includes nested arrays/aggregate memory layout, external C
-  generic declarations, bound callback signatures and existing unsupported
-  callback ABI cases (variadic/union/bitfield/int128 conversions).
+First-class generic instantiations bind widths through libffi closures. Static
+initializers use generated wrappers with registered bound arguments. Closure
+cache keys include widths, including subsequent adaptation. Native C open_region
+has a matching entry point. Concrete C struct arguments/returns and supported
+bound callbacks invoked from C have dedicated interoperability tests.
 
-The earlier native/experimental/polyref wrapper prototype remains isolated.
-The implemented approach keeps native addresses and reifies widths instead.
+Libffi page-boundary entries are reserved because Clang's function sanitizer
+reads a prefix before an indirect target. The remaining entries preserve libffi's
+original writable/code addresses. Reserved entries and active closures are live
+LSan roots while cached and are freed on explicit shutdown. The 2,048-closure
+stress test, live-cache test and deliberate 73-byte leak control remain logged.
+No function sanitizer is disabled. Adapted variadic/union/bitfield/int128 callback
+signatures that cannot be represented are rejected.
 
-Callback page-boundary correction:
-The first sanitizer self-bootstrap found a libffi static trampoline exactly at
-an executable page boundary. Clang's indirect-function check reads eight bytes
-before the target, which faulted when the preceding page was unmapped. Runtime
-allocation now reserves these first entries and exposes later entries on the
-same page, retaining libffi's original writable/code addresses. Reserved slots
-are freed on explicit shutdown and registered as live LSan roots while held.
-No sanitizer is disabled. A 2,048-closure stress check verifies safe placement,
-correct bound calls, shutdown and live-cache leak handling. The deliberate
-73-byte leak is still detected. layout-asan3 then completed all 81 source
-translations and linked under the fully instrumented layout-aware compiler.
-Logs: layout-closure-page-*.log, layout-asan3.log. Original failure is preserved
-in native/bootstrap/layout-asan2/library/compiler/tcdecl-translate.log.
-Reference: https://github.com/libffi/libffi/blob/v3.5.2/src/closures.c
-and https://github.com/libffi/libffi/blob/v3.5.2/src/x86/ffi64.c
+The arithmetic prover still uses 32-bit terms. Wide arithmetic is opaque to it;
+fat-pointer bounds and wide-index checks remain at runtime. This deliberately
+trades some check elimination for correct LP64 behavior. Runtime indexing checks
+the final address, including accesses through temporarily biased cursors, and
+validates wide extents before narrowing or multiplying.
 
-Expanded memory audit: generic-matrix.cyc currently fails with a confirmed
-ASan stack-buffer-overflow. Row strides of nested generic arrays still use
-the erased word width; this is the next memory-layout fix.
+See STATUS.txt for the current candidate stage names, validation and scope. Each bootstrap/test directory retains exact commands, generated C and logs;
+earlier failed checkpoints are diagnostic evidence, not current success claims.

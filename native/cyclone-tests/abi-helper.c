@@ -13,3 +13,14 @@ int abi_literal_values(unsigned long a, unsigned long b, long c, long d,
 }
 
 void *abi_pointer_at(unsigned long address) { return (void *)address; }
+
+struct abi_mixed { int tag; long wide; double fraction; };
+struct abi_small { int x; int y; };
+struct abi_mixed abi_mixed_roundtrip(struct abi_mixed x) {
+  x.tag--; x.wide++; x.fraction*=2; return x;
+}
+struct abi_small abi_small_roundtrip(struct abi_small x) { x.x--; x.y++; return x; }
+int abi_apply_int(int (*f)(int),int x) { return f(x); }
+long abi_apply_long(long (*f)(long),long x) { return f(x); }
+int abi_apply_reader(int (*f)(int *),int *p) { return f(p); }
+struct abi_small abi_apply_small(struct abi_small (*f)(struct abi_small),struct abi_small x) { return f(x); }

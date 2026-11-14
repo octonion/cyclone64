@@ -1,0 +1,30 @@
+#include "cyclone/library/std/core.h"
+using Core;
+extern "C" {
+  struct abi_mixed { int tag; long wide; double fraction; };
+  struct abi_small { int x; int y; };
+  struct abi_mixed abi_mixed_roundtrip(struct abi_mixed);
+  struct abi_small abi_small_roundtrip(struct abi_small);
+  int abi_apply_int(int (@)(int),int);
+  long abi_apply_long(long (@)(long),long);
+  int abi_apply_reader(int (@)(int @),int @);
+  struct abi_small abi_apply_small(struct abi_small (@)(struct abi_small),struct abi_small);
+}
+static `a identity(`a::B x) { return x; }
+static `a read_value(`a::B @p) { return *p; }
+static struct abi_small swap_small(struct abi_small a) {
+  struct abi_small result={.x=a.y,.y=a.x}; return result;
+}
+int main(int argc,string_t ?argv) {
+  struct abi_mixed a={.tag=-17,.wide=0x1234567800000012L,.fraction=1.25};
+  let b=abi_mixed_roundtrip(a);
+  if(b.tag!=-18 || b.wide!=a.wide+1 || b.fraction!=2.5) return 1;
+  struct abi_small x={.x=-7,.y=29};
+  let y=abi_small_roundtrip(x);
+  if(y.x!=-8 || y.y!=30) return 2;
+  if(abi_apply_int(identity,-31)!=-31 || abi_apply_long(identity,a.wide)!=a.wide) return 3;
+  int i=-49;
+  if(abi_apply_reader(read_value,&i)!=i) return 4;
+  let z=abi_apply_small(swap_small,x);
+  return z.x==29 && z.y==-7 ? 0 : 5;
+}

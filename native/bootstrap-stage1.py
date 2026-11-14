@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build source-derived Cyclone stage1; retain individual commands and diagnostics."""
 import argparse, concurrent.futures, json, os, pathlib, shlex, subprocess, sys
+from runtime_build import runtime_objects, runtime_libs
 p=argparse.ArgumentParser()
 p.add_argument('--jobs', type=int, default=4)
 p.add_argument('--cflags', default='-O2 -g')
@@ -40,8 +41,8 @@ for src in ['native/generated/libc/cstubs.c','library/std/boot_cstubs.c']:
     results.append(f'{src}: '+('PASS' if ok else 'compile FAIL'))
     if ok: objects.append(str(obj))
 if all('PASS' in r for r in results):
-    support=sorted((build/'cyclone/library/runtime').glob('*.o'))+[build/'cyclone/library/compiler/inference/cycinf.o',build/'config.o',build/'libbanshee64.a']
-    ok=run([a.cc,'-march=native',*shlex.split(a.cflags),*objects,*map(str,support),'-lbacktrace','-ldl','-lm','-lpthread','-o',str(out/'cyclone64')],out/'link.log')
+    support=runtime_objects(build)+[build/'cyclone/library/compiler/inference/cycinf.o',build/'config.o',build/'libbanshee64.a']
+    ok=run([a.cc,'-march=native',*shlex.split(a.cflags),*objects,*map(str,support),*runtime_libs(build),'-o',str(out/'cyclone64')],out/'link.log')
     results.append('stage link: '+('PASS' if ok else 'FAIL'))
 (out/'commands.json').write_text(json.dumps(commands,indent=2)+'\n')
 (out/'results.txt').write_text('\n'.join(results)+'\n')

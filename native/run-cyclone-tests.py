@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run stage0 diagnostics and native ABI probes; retain all generated code/logs."""
 import argparse, difflib, os, pathlib, subprocess, sys
+from runtime_build import runtime_objects, runtime_libs
 p = argparse.ArgumentParser()
 p.add_argument('--skip-diagnostics', action='store_true', help='skip exact upstream diagnostic text comparisons')
 p.add_argument('--probe-dir', default='native/cyclone-tests')
@@ -39,16 +40,16 @@ for src in sorted(pathlib.Path('native/cyclone-reject').glob('*.cyc')):
     q = run([compiler, '-o', out / (src.stem + '.c'), src], src.stem)
     ok = q.returncode == 1 and 'integer constant too large' in q.stdout + q.stderr
     results.append((src.stem, 'PASS' if ok else f'REJECTION FAIL ({q.returncode})'))
-objects = sorted((build / 'cyclone/stage0/library/std').rglob('*.o')) + sorted((build / 'cyclone/library/runtime').glob('*.o'))
+objects = sorted((build / 'cyclone/stage0/library/std').rglob('*.o')) + runtime_objects(build)
 if stage:
-    objects = sorted((stage/'library/std').glob('*.o')) + [stage/'native/generated/lineno.o',stage/'native/generated/libc/cycstubs.o',stage/'cstubs.o',stage/'boot_cstubs.o'] + sorted((build/'cyclone/library/runtime').glob('*.o'))
+    objects = sorted((stage/'library/std').glob('*.o')) + [stage/'native/generated/lineno.o',stage/'native/generated/libc/cycstubs.o',stage/'cstubs.o',stage/'boot_cstubs.o'] + runtime_objects(build)
 for src in sorted(pathlib.Path(a.probe_dir).glob('*.cyc')):
     pre = out / (src.stem + '.cyp'); generated = out / (src.stem + '.c')
     q = run([a.cc, '-E', '-x', 'c', '-Inative/include', src, '-o', pre], src.stem + '-cpp')
     if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue
     q = run([compiler, '-o', generated, pre], src.stem + '-translate')
     if q.returncode: results.append((src.stem, f'TRANSLATE FAIL ({q.returncode})')); continue
-    q = run([a.cc, '-std=gnu11', '-fno-strict-aliasing', *a.cflags.split(), '-Ilibrary/std/cyc-lib', generated, 'native/cyclone-tests/abi-helper.c', *objects, '-lbacktrace', '-ldl', '-lm', '-o', out / src.stem], src.stem + '-link')
+    q = run([a.cc, '-std=gnu11', '-fno-strict-aliasing', *a.cflags.split(), '-Ilibrary/std/cyc-lib', generated, 'native/cyclone-tests/abi-helper.c', *objects, *runtime_libs(build), '-o', out / src.stem], src.stem + '-link')
     if q.returncode: results.append((src.stem, 'LINK FAIL')); continue
     q = run([out / src.stem], src.stem + '-run')
     results.append((src.stem, 'PASS' if q.returncode == 0 else f'RUN FAIL ({q.returncode})'))

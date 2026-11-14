@@ -57,22 +57,30 @@ Remaining work — neither candidate is declared final
    Investigate adapter generation in Toc at concrete-function-to-erased-function
    conversions, with correct handling for nonconstant function pointers. Preserve
    closure lifetime/identity and avoid merely suppressing function sanitization.
-3. Compiler allocations still use the historical no-GC runtime and leak at exit.
-   The workstation has system BDW-GC 8.2.12, headers and pkg-config bdw-gc. A real
-   collector backend can be tested, while preserving a malloc-backed sanitizer
-   mode so heap errors remain detectable. Inspection also found nogc.c GC_realloc
-   reallocating n bytes without its header, and runtime_memory.c bounded malloc
-   narrowing size_t to unsigned, plus unchecked calloc products. These require
-   regressions and fixes, not just a collector switch. No allocator changes have
-   been made yet in this checkpoint.
+3. The normal runtime now has an explicitly selected system BDW-GC backend.
+   A 256 MiB allocation stress test retained an interior-pointer root and kept
+   the heap under 300 KiB. The GC-backed compiler rebuilt all 81 sources and
+   passed all 12 native probes and the upstream executable suite. A fresh
+   stage0 -> gc-fresh1 -> gc-fresh2 -> gc-fresh3 bootstrap converged 81/81 C files.
+   The malloc-backed nogc option remains for ASan's allocation redzones; it still
+   retains unfreed compiler objects for process lifetime and reports them to
+   LSan. No leak suppression was added. Broader GC/foreign-root stress remains
+   part of validation; a collector switch alone does not prove every root safe.
+   Fixed the reproduced nogc realloc header overflow, NULL realloc/free, size_t
+   narrowing, calloc and region/reap product overflow, page-size sums, and the
+   fast region allocator's narrowing and zero/refcount handling. Direct allocator
+   regressions pass GCC and GCC/Clang ASan+UBSan (Clang function sanitizer too).
+   Clang-instrumented full source compiler builds, but its first real translation
+   fails on the generic do_stage callback calling do_parse via the wrong C type.
+   This is the same unresolved ABI issue in item 2, now confirmed inside compiler.
 4. Audit remaining pointer-width assumptions, proof/range arithmetic, integer
    constant folding, serialization and external ABI. Test full instrumented source
    compiler/stdlib, and obtain a 32-bit reference if feasible (local multilib absent).
    Old diagnostic references retain one-column fail3 difference and an expected
    zeroptr internal exception that has now been fixed.
-5. Verify a fresh bootstrap directly from minimal checked-in stage0 after the next
-   ABI changes settle. Stage0 still has the old constant AST and tuple backend;
-   do not mix regenerated individual Long_c/tuple modules into that older ABI.
+5. Fresh bootstrap is now verified as described above. Repeat it after callback
+   and generic-pointer representation changes. Do not mix regenerated individual
+   Long_c/tuple modules into the older checked-in stage0 ABI.
 
 Reproduction for current language checks
   native/run-cyclone-tests.py --skip-diagnostics --stage-dir native/bootstrap/erasure-stage3
@@ -86,3 +94,25 @@ The two original blocker files generic-tuple.cyc and pointer-add.cyc now pass.
 They remain in the blocker directory alongside the new failing regressions to
 show progress and prevent the original bugs from returning. GCC-only success
 must not conceal Clang-detected callback UB.
+
+Allocator/GC checkpoint evidence (2026-11-14)
+  native/logs/gc-allocation-baseline.log -- reproduced ASan heap overflow
+  native/logs/gc-allocation{,-asan,-clang}.log -- fixed boundaries PASS
+  native/logs/allocator-banshee-regression.log -- 7 Banshee + 8 region tests PASS
+  native/logs/allocator-asan-probes.log -- 12/12 native probes PASS
+  native/logs/sysgc-collection.log -- collection and interior root PASS
+  native/logs/gc-stage2-{probes,cyctest}.log -- native/upstream suites PASS
+  native/logs/gc-fresh-convergence.json -- 81/81 identical
+  native/logs/runtime-backend-selection.log -- incompatible backends rejected
+  native/logs/gc-clang-smoke.log -- exact compiler callback sanitizer failure
+
+Select a runtime explicitly in a fresh build directory:
+  make -f native/Makefile BUILD=native/sysgc NATIVE_GC=system -j12 cyclone
+  native/bootstrap-stage1.py --build native/sysgc --compiler native/sysgc/cyclone64 \
+    --out native/bootstrap/gc-fresh1
+  make -f native/Makefile BUILD=native/sysgc native/sysgc/check-gc-collection
+The backend manifest records BDW-GC version/cflags/ldflags. Bootstrap and test
+scripts read it when linking. Changing a backend in place is rejected. Use new
+BUILD directories when changing instrumentation flags as well. CC and ARCH
+remain explicit overrides; BACKTRACE_CPPFLAGS can override the platform header
+path used for Clang's runtime_stacktrace.c compilation.

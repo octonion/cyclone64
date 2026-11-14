@@ -355,13 +355,12 @@ void *_bounded_GC_calloc_atomic(size_t, size_t, const char *, int);
 #define _cyccalloc_atomic(n, s) _bounded_GC_calloc_atomic(n, s, __FILE__, __LINE__)
 #endif
 
-static inline unsigned int _check_times(unsigned x, unsigned y) {
-  unsigned long long whole_ans = ((unsigned long long)x) * ((unsigned long long)y);
-  unsigned word_ans = (unsigned)whole_ans;
-  if (word_ans < whole_ans || word_ans > MAX_MALLOC_SIZE)
-    _throw_badalloc();
-  return word_ans;
-}
+/* Preserve original operand widths until the bounded product is validated. */
+#define _check_times(x, y) \
+  ({ __auto_type _ct_x = (x); __auto_type _ct_y = (y); \
+     if (_ct_x < 0 || _ct_y < 0 || \
+         (_ct_y != 0 && _ct_x > MAX_MALLOC_SIZE / _ct_y)) _throw_badalloc(); \
+     (unsigned int)(_ct_x * _ct_y); })
 
 #define _CYC_MAX_REGION_CONST 0
 #define _CYC_MIN_ALIGNMENT 16
@@ -371,12 +370,12 @@ _Static_assert(_CYC_MIN_ALIGNMENT >= sizeof(double), "maximum alignment can't fi
 extern int rgn_total_bytes;
 
 static inline void *_fast_region_malloc(struct _RegionHandle *r, _AliasQualHandle_t aq,
-                                        unsigned orig_s) {
-  if (r > (struct _RegionHandle *)_CYC_MAX_REGION_CONST && r->curr != 0) {
+                                        size_t orig_s) {
+  if (r != NULL && r->curr != 0 && aq == 0 && orig_s != 0 && orig_s <= MAX_MALLOC_SIZE) {
 #ifdef CYC_NOALIGN
-    unsigned s = orig_s;
+    size_t s = orig_s;
 #else
-    unsigned s = (orig_s + _CYC_MIN_ALIGNMENT - 1) & (~(_CYC_MIN_ALIGNMENT - 1));
+    size_t s = (orig_s + _CYC_MIN_ALIGNMENT - 1) & (~(_CYC_MIN_ALIGNMENT - 1));
 #endif
     char *result;
     result = r->offset;

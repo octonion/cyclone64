@@ -47,7 +47,7 @@ struct _pool {
 
 // defined in cyc_include.h when profiling turned on
 static FILE *alloc_log = NULL;
-extern unsigned int GC_gc_no;
+extern unsigned long GC_gc_no;
 extern size_t GC_get_heap_size();
 extern size_t GC_get_free_bytes();
 extern size_t GC_get_total_bytes();
@@ -61,16 +61,18 @@ static size_t region_get_free_bytes(struct _RegionHandle *);
 static size_t region_get_total_bytes(struct _RegionHandle *);
 void _free_region(struct _RegionHandle *);
 
-// FIX: I'm putting GC_calloc and GC_calloc_atomic in here as just
-// calls to GC_malloc and GC_malloc_atomic respectively.  This will
-// *not* work for the nogc option.
-void *GC_calloc(size_t n, size_t t) { return (void *)GC_malloc(n * t); }
+// Both supported allocators clear pointer-containing allocations.
+void *GC_calloc(size_t n, size_t t) {
+  if (t && n > SIZE_MAX / t) _throw_badalloc();
+  return GC_malloc(n * t);
+}
 
 void *GC_realloc_hint(void *x, size_t old_size, size_t new_size) {
   return (void *)GC_realloc(x, new_size);
 }
 
 void *GC_calloc_atomic(size_t n, size_t t) {
+  if (t && n > SIZE_MAX / t) _throw_badalloc();
   size_t p = n * t;
   // the collector does not zero things when you call malloc atomic...
   void *res = GC_malloc_atomic(p);
@@ -84,7 +86,7 @@ void *GC_calloc_atomic(size_t n, size_t t) {
 
 void *_bounded_GC_malloc(size_t n, const char *file, int lineno) {
   void *res = NULL;
-  if ((unsigned)n >= MAX_ALLOC_SIZE) {
+  if (n >= MAX_ALLOC_SIZE) {
     errprintf("malloc size ( = %zu ) is too big or negative\n", n);
     _throw_badalloc_fn(file, lineno);
   } else {
@@ -97,7 +99,7 @@ void *_bounded_GC_malloc(size_t n, const char *file, int lineno) {
 }
 void *_bounded_GC_malloc_atomic(size_t n, const char *file, int lineno) {
   void *res = NULL;
-  if ((unsigned)n >= MAX_ALLOC_SIZE) {
+  if (n >= MAX_ALLOC_SIZE) {
     errprintf("malloc size ( = %zu ) is too big or negative\n", n);
     _throw_badalloc_fn(file, lineno);
   } else {
@@ -109,10 +111,9 @@ void *_bounded_GC_malloc_atomic(size_t n, const char *file, int lineno) {
   return res;
 }
 void *_bounded_GC_calloc(size_t n, size_t s, const char *file, int lineno) {
-  size_t p = n * s;
   void *res = NULL;
-  if (p >= MAX_ALLOC_SIZE) {
-    errprintf("calloc size ( = %zu ) is too big or negative\n", p);
+  if (s && n > (MAX_ALLOC_SIZE - 1U) / s) {
+    errprintf("calloc dimensions ( = %zu, %zu ) exceed allocation limit\n", n, s);
     _throw_badalloc_fn(file, lineno);
   } else {
     res = GC_calloc(n, s);
@@ -123,13 +124,12 @@ void *_bounded_GC_calloc(size_t n, size_t s, const char *file, int lineno) {
   return res;
 }
 void *_bounded_GC_calloc_atomic(size_t n, size_t s, const char *file, int lineno) {
-  size_t p = n * s;
   void *res = NULL;
-  if (p >= MAX_ALLOC_SIZE) {
-    errprintf("calloc size ( = %zu ) is too big or negative\n", p);
+  if (s && n > (MAX_ALLOC_SIZE - 1U) / s) {
+    errprintf("calloc dimensions ( = %zu, %zu ) exceed allocation limit\n", n, s);
     _throw_badalloc_fn(file, lineno);
   } else {
-    res = GC_calloc(n, s);
+    res = GC_calloc_atomic(n, s);
     if (res == NULL) {
       _throw_badalloc_fn(file, lineno);
     }
@@ -202,19 +202,24 @@ static size_t default_region_page_size = CYC_MIN_REGION_PAGE_SIZE;
 void Cyc_Core_rufree_nop(struct _RegionHandle *r, unsigned char *ptr) {}
 void Cyc_Core_rdrop_refptr_nop(struct _RegionHandle *r, struct _fat_ptr ptr) {}
 
+static size_t region_size_add(size_t a, size_t b) {
+  if (a >= MAX_ALLOC_SIZE || b >= MAX_ALLOC_SIZE - a) _throw_badalloc();
+  return a + b;
+}
+
 static void *grow_region(void *vr, size_t s, bufsize *bget_incr) {
   struct _RegionHandle *r = (struct _RegionHandle *)vr;
   struct _RegionPage *p;
   size_t prev_size, next_size;
 
   prev_size = r->last_plus_one - ((char *)r->curr + sizeof(struct _RegionPage));
-  next_size = prev_size * 2;
+  next_size = region_size_add(prev_size, prev_size);
 
   if (next_size < s)
-    next_size = s + default_region_page_size;
+    next_size = region_size_add(s, default_region_page_size);
 
   // Note, we call calloc here to ensure we get zero-filled pages
-  p = _bounded_GC_calloc(sizeof(struct _RegionPage) + next_size, 1, __FILE__, __LINE__);
+  p = _bounded_GC_calloc(region_size_add(sizeof(struct _RegionPage), next_size), 1, __FILE__, __LINE__);
   if (!p) {
     errprintf("grow_region failure");
     _throw_badalloc();
@@ -244,7 +249,7 @@ static void *acquire_reap_page(void *vr, bufsize s, bufsize *incr);
 static void get_first_region_page(struct _RegionHandle *r, size_t s, int init_bget) {
   size_t page_size = default_region_page_size < s ? s : default_region_page_size;
   struct _RegionPage *p = (struct _RegionPage *)_bounded_GC_calloc(
-      sizeof(struct _RegionPage) + page_size, 1, __FILE__, __LINE__);
+      region_size_add(sizeof(struct _RegionPage), page_size), 1, __FILE__, __LINE__);
   if (p == NULL)
     _throw_badalloc();
 #ifdef CYC_REGION_PROFILE
@@ -273,6 +278,7 @@ static void get_first_region_page(struct _RegionHandle *r, size_t s, int init_bg
 
 // allocate s bytes within region r
 static void *region_malloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, size_t s) {
+  if (s >= MAX_ALLOC_SIZE) _throw_badalloc();
   if (r == CYC_CORE_HEAP_REGION) {  // no reaps for now
     if (aq == CYC_CORE_REFCNT_AQUAL) {
       // need to add a word for the reference count.  We use a word to
@@ -370,6 +376,7 @@ static void *region_vmalloc_impl(struct _RegionHandle *r, size_t s) {
 // allocate s bytes within region r
 static void *region_calloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, size_t n,
                                 size_t t) {
+  if (t && n > (MAX_ALLOC_SIZE - 1U) / t) _throw_badalloc();
   size_t s = n * t;
   if (r == CYC_CORE_HEAP_REGION) {
     if (aq == CYC_CORE_REFCNT_AQUAL) {
@@ -514,13 +521,11 @@ static void reap_rufree_impl(struct _RegionHandle *r, unsigned char *ptr) {
 
 static void *acquire_reap_page(void *vr, bufsize s, bufsize *incr) {
   struct _RegionHandle *r = (struct _RegionHandle *)vr;  // key->priv;
-  size_t ss = 2 * (r->last_plus_one - ((char *)r->curr + sizeof(struct _RegionPage)));
-  size_t next_size =
-      ss < (2 * s) ? ((2 * s) + default_region_page_size) : (ss + default_region_page_size);
-
-  if (r->curr == NULL)  // no assert :(
-    _throw_bad_reapalloc();
-  void *mem = _bounded_GC_calloc(next_size + sizeof(struct _RegionPage), 1, __FILE__, __LINE__);
+  if (r->curr == NULL || s < 0) _throw_bad_reapalloc();
+  size_t previous = r->last_plus_one - ((char *)r->curr + sizeof(struct _RegionPage));
+  size_t largest = previous < (size_t)s ? (size_t)s : previous;
+  size_t next_size = region_size_add(region_size_add(largest, largest), default_region_page_size);
+  void *mem = _bounded_GC_calloc(region_size_add(next_size, sizeof(struct _RegionPage)), 1, __FILE__, __LINE__);
   if (!mem)
     _throw_badalloc();
   // chain the new page onto this regions list of free pages
@@ -545,6 +550,7 @@ static void *acquire_reap_page(void *vr, bufsize s, bufsize *incr) {
 
 // allocate s bytes within region r
 static void *reap_malloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, size_t s) {
+  if (s >= MAX_ALLOC_SIZE) _throw_badalloc();
   if (r == CYC_CORE_HEAP_REGION) {
     if (aq == CYC_CORE_REFCNT_AQUAL) {
       // need to add a word for the reference count.  We use a word to
@@ -626,6 +632,7 @@ static void *reap_vmalloc_impl(struct _RegionHandle *r, size_t s) {
 
 // allocate s bytes within region r
 static void *reap_calloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, size_t n, size_t t) {
+  if (t && n > (MAX_ALLOC_SIZE - 1U) / t) _throw_badalloc();
   return reap_malloc_impl(r, aq, (n * t));
 }
 static void *reap_aqual_malloc_impl(_AliasQualHandle_t aq, size_t s) {
@@ -842,7 +849,7 @@ void _fini_regions() {
   fprintf(stderr, "unique_free_bytes: %d\n", unique_freed_bytes);
   fprintf(stderr, "refcnt_total_bytes: %d\n", refcnt_total_bytes);
   fprintf(stderr, "refcnt_free_bytes: %d\n", refcnt_freed_bytes);
-  fprintf(stderr, "number of collections: %d\n", GC_gc_no);
+  fprintf(stderr, "number of collections: %lu\n", GC_gc_no);
   if (alloc_log != NULL)
     fclose(alloc_log);
 #endif
@@ -851,7 +858,7 @@ void _fini_regions() {
 // set the default region page size -- returns false and has no effect
 // if s is not at least CYC_MIN_REGION_PAGE_SIZE
 int Cyc_set_default_region_page_size(size_t s) {
-  if (s < CYC_MIN_REGION_PAGE_SIZE)
+  if (s < CYC_MIN_REGION_PAGE_SIZE || s >= MAX_ALLOC_SIZE)
     return 0;
   default_region_page_size = s;
   return 1;
@@ -949,11 +956,11 @@ void *Cyc_Core_open_region(struct Cyc_Core_DynamicRegion *k, void *env,
 // since the last allocation, and if so makes a log entry for it based
 // on the amount of freed data.
 static void _profile_check_gc() {
-  static unsigned int last_GC_no = 0;
+  static unsigned long last_GC_no = 0;
   if (GC_gc_no != last_GC_no) {
     last_GC_no = GC_gc_no;
     if (alloc_log != NULL) {
-      fprintf(alloc_log, "%ld gc-%u\theap\tgc\t%zu\t%zu\t%zu\n", clock(), last_GC_no,
+      fprintf(alloc_log, "%ld gc-%lu\theap\tgc\t%zu\t%zu\t%zu\n", clock(), last_GC_no,
               GC_get_heap_size(), GC_get_free_bytes(), GC_get_total_bytes());
     }
   }
@@ -1001,34 +1008,32 @@ void *_profile_region_malloc(struct _RegionHandle *r, _AliasQualHandle_t aq, siz
   if (alloc_log != NULL) {
     if (r == CYC_CORE_HEAP_REGION) {
       if (aq == CYC_CORE_REFCNT_AQUAL) {
-        s = GC_size(addr - sizeof(int));  // back up to before the refcnt
-        logaddr = (addr - sizeof(int));
+        s = GC_size(addr - sizeof(refcnt_t));  // back up to before the refcnt
+        logaddr = (addr - sizeof(refcnt_t));
       } else {
         s = GC_size(addr);
       }
     } else {
       if (r->fcns == &reap_functions) {
         if (aq == CYC_CORE_REFCNT_AQUAL) {
-          logaddr = (addr - sizeof(int));
+          logaddr = (addr - sizeof(refcnt_t));
         }
         // bget takes two additional words
         s = bget_size(r->key, logaddr);
       } else if (aq == CYC_CORE_REFCNT_AQUAL)
-        s += sizeof(int);
+        s += sizeof(refcnt_t);
     }
     // logging for reaps isn't exact right now. In particular, if U and RC stuff
     // allocated in a reap, aprof will still treat it as if it was in the old `U, `RC
     // Need to beef up aprof to handle reaps.
-    fprintf(alloc_log, "%ld %s:%s:%d\t%s\talloc\t%zu\t%zu\t%zu\t%zu\t%x\n", clock(), file, func,
+    fprintf(alloc_log, "%ld %s:%s:%d\t%s\talloc\t%zu\t%zu\t%zu\t%zu\t%p\n", clock(), file, func,
             lineno,
             (aq == Cyc_Core_unique_qual
                  ? "unique"
                  : (aq == Cyc_Core_refcnt_qual ? "refcnt"
                                                : (r == CYC_CORE_HEAP_REGION ? "heap" : r->name))),
             s, region_get_heap_size(r), region_get_free_bytes(r), region_get_total_bytes(r),
-            (unsigned int)logaddr);
-  } else {
-    s = GC_size(addr);
+            (void *)logaddr);
   }
   return (void *)addr;
 }
@@ -1043,32 +1048,32 @@ void *_profile_region_calloc(struct _RegionHandle *r, _AliasQualHandle_t aq, siz
   if (alloc_log != NULL) {
     if (r == CYC_CORE_HEAP_REGION) {
       if (aq == CYC_CORE_REFCNT_AQUAL) {
-        s = GC_size(addr - sizeof(int));  // back up to before the refcnt
-        logaddr = (addr - sizeof(int));
+        s = GC_size(addr - sizeof(refcnt_t));  // back up to before the refcnt
+        logaddr = (addr - sizeof(refcnt_t));
       } else {
         s = GC_size(addr);
       }
     } else {
       if (r->fcns == &reap_functions) {
         if (aq == CYC_CORE_REFCNT_AQUAL) {
-          logaddr = (addr - sizeof(int));
+          logaddr = (addr - sizeof(refcnt_t));
         }
         // bget takes two additional words
         s = bget_size(r->key, logaddr);
       } else if (aq == CYC_CORE_REFCNT_AQUAL)
-        s += sizeof(int);
+        s += sizeof(refcnt_t);
     }
     // logging for reaps isn't exact right now. In particular, if U and RC stuff
     // allocated in a reap, aprof will still treat it as if it was in the old `U, `RC
     // Need to beef up aprof to handle reaps.
-    fprintf(alloc_log, "%ld %s:%s:%d\t%s\talloc\t%zu\t%zu\t%zu\t%zu\t%x\n", clock(), file, func,
+    fprintf(alloc_log, "%ld %s:%s:%d\t%s\talloc\t%zu\t%zu\t%zu\t%zu\t%p\n", clock(), file, func,
             lineno,
             (aq == Cyc_Core_unique_qual
                  ? "unique"
                  : (aq == Cyc_Core_refcnt_qual ? "refcnt"
                                                : (r == CYC_CORE_HEAP_REGION ? "heap" : r->name))),
             s, region_get_heap_size(r), region_get_free_bytes(r), region_get_total_bytes(r),
-            (unsigned int)logaddr);
+            (void *)logaddr);
   }
   return (void *)addr;
 }
@@ -1086,14 +1091,14 @@ void *_profile_aqual_calloc(_AliasQualHandle_t aq, size_t t1, size_t t2, const c
 static void *_do_profile(void *result, int is_atomic, const char *file, const char *func,
                          int lineno) {
   _profile_check_gc();
-  int n = GC_size(result);
+  size_t n = GC_size(result);
   heap_total_bytes += n;
   if (is_atomic)
     heap_total_atomic_bytes += n;
   if (alloc_log != NULL) {
-    fprintf(alloc_log, "%ld %s:%s:%d\theap\talloc\t%d\t%zu\t%zu\t%zu\t%x\n", clock(), file, func,
+    fprintf(alloc_log, "%ld %s:%s:%d\theap\talloc\t%zu\t%zu\t%zu\t%zu\t%p\n", clock(), file, func,
             lineno, n, GC_get_heap_size(), GC_get_free_bytes(), GC_get_total_bytes(),
-            (unsigned int)result);
+            (void *)result);
   }
   return result;
 }
@@ -1252,8 +1257,8 @@ int region_alloc_bytes(struct _RegionHandle *r) { return region_get_total_bytes(
 void CYCALLOCPROFILE_GC_add_to_heap(void *p, unsigned long bytes) {
 #ifdef CYC_REGION_PROFILE
   if (alloc_log != NULL) {
-    fprintf(alloc_log, "%lu @\theap\tgc_add_to_heap\t%x\t%zu\t%zu\t%zu\t%zu\n", clock(),
-            (unsigned int)p, bytes, GC_get_heap_size(), GC_get_free_bytes(), GC_get_total_bytes());
+    fprintf(alloc_log, "%lu @\theap\tgc_add_to_heap\t%p\t%zu\t%zu\t%zu\t%zu\n", clock(),
+            (void *)p, bytes, GC_get_heap_size(), GC_get_free_bytes(), GC_get_total_bytes());
   }
 #endif
 }

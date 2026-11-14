@@ -83,6 +83,7 @@ void GC_register_finalizer_no_order(GC_PTR obj, GC_finalization_proc fn, GC_PTR 
 /* This is the platform default allocator (malloc) */
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "cyc_include.h"
 
@@ -92,7 +93,7 @@ typedef struct GC_head {
 
 void GC_init(void) {
   /* 4MiB of spare memory in case of OOM. */
-  GC_spare_memory = GC_malloc_atomic(4 * 1024 * 1024);
+  if (!GC_spare_memory) GC_spare_memory = GC_malloc_atomic(4 * 1024 * 1024);
 }
 
 size_t GC_size(void const *x) {
@@ -106,6 +107,7 @@ size_t GC_get_heap_size(void) { return 0; }
 size_t GC_get_free_bytes(void) { return 0; }
 
 void GC_free(void *x) {
+  if (!x) return;
   GC_head *p = x;
 
   free(p - 1);
@@ -122,6 +124,7 @@ static void out_of_memory(void) {
 void *GC_malloc(size_t x) {
   // FIX:  I'm calling calloc to ensure the memory is zero'd.  This
   // is because I had to define GC_calloc in runtime_memory.c
+  if (x > SIZE_MAX - sizeof(GC_head) - 1) out_of_memory();
   GC_head *p = calloc(1, sizeof *p + x + 1);
 
   if (!p)
@@ -136,6 +139,7 @@ void *GC_malloc(size_t x) {
 void *GC_malloc_atomic(size_t x) {
   // FIX:  I'm calling calloc to ensure the memory is zero'd.  This
   // is because I had to define GC_calloc in runtime_memory.c
+  if (x > SIZE_MAX - sizeof(GC_head) - 1) out_of_memory();
   GC_head *p = calloc(1, sizeof *p + x + 1);
 
   if (!p)
@@ -148,22 +152,27 @@ void *GC_malloc_atomic(size_t x) {
 }
 
 void *GC_realloc(void *x, size_t n) {
+  if (!x) return GC_malloc(n);
+  if (n > SIZE_MAX - sizeof(GC_head) - 1) out_of_memory();
   size_t sz = GC_size(x);
   GC_head *p = x;
 
   p--;
 
 #if (defined(__linux__) && defined(__KERNEL__))
-  p = realloc(p, sz, n);
+  p = realloc(p, sizeof *p + sz + 1, sizeof *p + n + 1);
 #else
-  p = realloc(p, n);
+  p = realloc(p, sizeof *p + n + 1);
 #endif
   if (!p)
     out_of_memory();
 
   p->size = n;
 
-  total_bytes_allocd += n - sz;
+  if (n > sz) {
+    memset((unsigned char *)(p + 1) + sz, 0, n - sz);
+    total_bytes_allocd += n - sz;
+  }
 
   return p + 1;
 }

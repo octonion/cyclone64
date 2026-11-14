@@ -1,0 +1,28 @@
+#include "cyclone/library/std/core.h"
+using Core;
+extern "C" unsigned long abi_large_index(void);
+int main(int argc, string_t ?argv) {
+  region r;
+  int ?a=rnew(r) {10,20,30};
+  unsigned long n=abi_large_index();
+  int ?p=a+n;
+  if (numelts(p) != 0 || sizeof(p-a) != sizeof(long)) return 1;
+  if (p-a != (long)n || a-p != -(long)n) return 2;
+  try { int v=p[0]; return 3; } catch { default: break; }
+  p -= n;
+  if (p[0] != 10 || numelts(p) != 3) return 4;
+  p += n;
+  try { int v=p[0]; return 5; } catch { default: break; }
+  p = p-n;
+  p += 2UL;
+  p -= 1UL;
+  if (p[0] != 20) return 6;
+  p = p - -1L;
+  if (p[0] != 30) return 7;
+  p = (a+11L)-10UL;
+  if (p[0] != 20) return 8;
+  try { p=a+18446744073709551615UL; return 9; } catch { default: break; }
+  try { p=a-18446744073709551615UL; return 10; } catch { default: break; }
+  try { p=a-(-9223372036854775807L-1L); return 11; } catch { default: break; }
+  return 0;
+}

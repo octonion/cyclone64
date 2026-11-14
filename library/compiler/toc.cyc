@@ -203,9 +203,12 @@ MAKE_VAR(_fat_ptr_decrease_size);
 MAKE_VAR(_get_zero_arr_size_char);
 MAKE_VAR(_get_zero_arr_size_other);
 MAKE_VAR(_fat_ptr_plus);
+MAKE_VAR(_fat_ptr_minus);
+MAKE_VAR(_fat_ptr_diff);
 MAKE_VAR(_zero_arr_plus_char);
 MAKE_VAR(_zero_arr_plus_other);
 MAKE_VAR(_fat_ptr_inplace_plus);
+MAKE_VAR(_fat_ptr_inplace_minus);
 MAKE_VAR(_zero_arr_inplace_plus_char);
 MAKE_VAR(_zero_arr_inplace_plus_other);
 MAKE_VAR(_fat_ptr_inplace_plus_post);
@@ -267,13 +270,20 @@ static $(list_t<designator_t>, exp_t) @make_field(var_t name, exp_t e) {
 static exp_t fncall_exp_dl(exp_t f, ... exp_t args) {
   return fncall_exp(f, List::from_array(args), DL);
 }
-static exp_t cast_it(type_t t, exp_t e) {  // DJG: sound for numeric casts?
-  switch (e->r) {
-    case &Cast_e(_, e, _, No_coercion):
-      return cast_it(t, e);
-    default:
-      return set_type(cast_exp(t, e, false, No_coercion, DL), t);
-  }
+static exp_t cast_it(type_t t, exp_t e) {
+  // Integer slots use canonical zero-extended bit patterns. This also makes
+  // a write through an int* view preserve the upper bytes of a boxed slot.
+  // Do not discard nested numeric casts: they may truncate or change sign.
+  if (sizeof(void *) > sizeof(int) && e->topt != NULL)
+    switch ($(compress(t), compress((type_t)e->topt))) {
+      case $(&PointerType(PtrInfo(&AppType(&VoidCon, _), _, _)),
+             &AppType(&IntCon(_, Int_sz), _)):
+        e = set_type(cast_exp(uint_type, e, false, No_coercion, DL), uint_type);
+        e = set_type(cast_exp(ulong_type, e, false, No_coercion, DL), ulong_type);
+        break;
+      default: break;
+    }
+  return set_type(cast_exp(t, e, false, No_coercion, DL), t);
 }
 
 exp_t get_exn_thrown_expression(toc_context_t ctxt) {
@@ -294,7 +304,7 @@ exp_t get_exn_thrown_expression(toc_context_t ctxt) {
 
 // These constructors are useful when we want to just update the
 // raw part of an expression or statement.
-static raw_exp_t cast_it_r(type_t t, exp_t e) { return new Cast_e(t, e, false, No_coercion); }
+static raw_exp_t cast_it_r(type_t t, exp_t e) { return cast_it(t, e)->r; }
 static raw_exp_t deref_exp_r(exp_t e) { return new Deref_e(e); }
 static raw_exp_t subscript_exp_r(exp_t e1, exp_t e2) { return new Subscript_e(e1, e2); }
 static raw_exp_t stmt_exp_r(stmt_t s) { return new StmtExp_e(s); }
@@ -696,6 +706,13 @@ type_t typ_to_c(toc_context_t ctxt, type_t t) {
   return trans_type(ctxt, t);
 }
 
+// A boxed type variable occupies one pointer word. Concrete tuple slots
+// that may instantiate it must use the same representation on LP64, just as
+// polymorphic named-aggregate fields already do. Arithmetic remains int-sized.
+static bool tuple_word_field(type_t t) {
+  return sizeof(void *) > sizeof(int) && is_boxed(t);
+}
+
 static type_t trans_type(toc_context_t ctxt, type_t t) {
   switch (t) {
     case &AppType(&VoidCon, _):
@@ -743,12 +760,13 @@ static type_t trans_type(toc_context_t ctxt, type_t t) {
       return new FnType(FnInfo{NULL, NULL,     tq2,  trans_type(ctxt, t2), new_args, c_vararg, NULL,
                                NULL, new_atts, NULL, NULL,         NULL,     NULL,     NULL,
                                NULL, NULL,     NULL, NULL,         NULL,     NULL});
-    case &AnonAggrType(k, _, fs):
-      // similar to tuple translation (introduce sharing to appease C)
-      // but we have full aggrfields to deal with
+    case &AnonAggrType(k, is_tuple, fs):
       let fs2 = NULL;
-      for (; fs != NULL; fs = fs->tl)
-        fs2 = new List(aggrfield_to_c(fs->hd, trans_type(ctxt, fs->hd->type)), fs2);
+      for (; fs != NULL; fs = fs->tl) {
+        let ft = fs->hd->type;
+        let ct = is_tuple && tuple_word_field(ft) ? void_star_type(ctxt) : trans_type(ctxt, ft);
+        fs2 = new List(aggrfield_to_c(fs->hd, ct), fs2);
+      }
       return add_anon_aggr_type(ctxt, k, imp_rev(fs2));
     case &AppType(c as & AggrCon(info), ts):
       // If we are in C code, the implementation may not be set here.
@@ -926,12 +944,13 @@ loop:
       let ad = get_known_aggrdecl(info);
       if (ad->impl == NULL)
         toc_impos("is_poly_field: type missing fields");
-      fallthru(ad->impl->fields);
-    case &AnonAggrType(_, _, fs):
+      fallthru(false, ad->impl->fields);
+    case &AnonAggrType(_, is_tuple, fs):
       let field = lookup_field(fs, f);
       if (field == NULL)
         toc_impos("is_poly_field: bad field ", *f);
-      return is_void_star_or_boxed_tvar(field->type);
+      return is_void_star_or_boxed_tvar(field->type) ||
+             (is_tuple && tuple_word_field(field->type));
     default:
       toc_impos("is_poly_field: bad type ", t);
   }
@@ -1465,6 +1484,27 @@ static void push_address_stmt(stmt_t s) {
   }
 }
 
+// Read and write a polymorphic scalar slot at its full word width while
+// performing the operation in the source integer type. Evaluate its address
+// only once, and retain the old value for postfix increments.
+static raw_exp_t poly_integer_update(toc_context_t ctxt, exp_t lhs, type_t scalar,
+                                     primop_t op, exp_t rhs, bool post) {
+  let word = void_star_type(ctxt);
+  let pt = cstar_type(word, mt_tq);
+  let address_name = temp_var(ctxt);
+  let old_name = temp_var(ctxt);
+  let address = set_type(var_exp(address_name, DL), pt);
+  let slot = set_type(deref_exp(address, DL), word);
+  let old_value = set_type(var_exp(old_name, DL), scalar);
+  let operation = cast_it(scalar, set_type(prim2_exp(op, deep_copy(old_value), rhs, DL), scalar));
+  let store = assign_stmt(deep_copy(slot), cast_it(word, operation), DL);
+  let result = post ? deep_copy(old_value) : cast_it(scalar, deep_copy(slot));
+  let body = declare_stmt(old_name, scalar, cast_it(scalar, deep_copy(slot)),
+                          seq_stmt(store, exp_stmt(result, DL), DL), DL);
+  return stmt_exp_r(declare_stmt(address_name, pt,
+                                  cast_it(pt, push_address_exp(lhs)), body, DL));
+}
+
 // We're translating e which is of the form e_1 op= e_2 where e_1
 // involves a zero-terminated pointer and is of the form *ea or
 // ea[eb].  We need to prevent overwriting the last zero in the array.
@@ -1837,14 +1877,12 @@ void exp_to_c(env_t nv, exp_t e) {
           if (is_fat_pointer_type_elt(old_types->hd, &elt_type)) {
             exp_t e1 = es->hd;
             exp_t e2 = es->tl->hd;
-            if (is_fat_pointer_type(old_types->tl->hd)) {
-              e1->r    = aggrmember_exp_r(deep_copy(e1), curr_sp);
-              e2->r    = aggrmember_exp_r(deep_copy(e2), curr_sp);
-              e1->topt = e2->topt = cstar_type(uchar_type, mt_tq);
-              e->r = divide_exp(deep_copy(e), sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL), DL)->r;
-            } else
-              e->r = fncall_exp_r(_fat_ptr_plus_e, e1, sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL),
-                                  set_type(prim1_exp(Minus, e2, DL), sint_type));
+            if (is_fat_pointer_type(old_types->tl->hd))
+              e->r = fncall_exp_r(_fat_ptr_diff_e, e1, e2,
+                                  sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL));
+            else
+              e->r = fncall_exp_r(_fat_ptr_minus_e, e1,
+                                  sizeoftype_exp(typ_to_c(nv->ctxt, elt_type), DL), e2);
           }
           break;
         case Eq:
@@ -1880,6 +1918,7 @@ void exp_to_c(env_t nv, exp_t e) {
       break;
     case &Increment_e(e2, incr):
       type_t e2_cyc_typ = (type_t)e2->topt;
+      bool poly_integer = is_integral_type(e2_cyc_typ) && is_poly_project(e2);
       // we need to worry about the case where e2 is of the form
       // *ea or ea[eb] and ea is a zero-terminated pointer, for
       // then we need to know that the inc/dec doesn't destroy the
@@ -1919,6 +1958,13 @@ void exp_to_c(env_t nv, exp_t e) {
       set_lhs(nv, true);
       exp_to_c(nv, e2);
       set_lhs(nv, false);
+      if (poly_integer) {
+        let op = (incr == PreDec || incr == PostDec) ? Minus : Plus;
+        e->r = poly_integer_update(nv->ctxt, e2, typ_to_c(nv->ctxt, e2_cyc_typ), op,
+                                    set_type(signed_int_exp(1, DL), sint_type),
+                                    incr == PostInc || incr == PostDec);
+        break;
+      }
       // only t ? or zero-terminated types are translated funny,
       // note that e2 is an lvalue!
       type_t elt_typ = void_type;
@@ -2023,22 +2069,15 @@ void exp_to_c(env_t nv, exp_t e) {
       if (popt != NULL) {
         type_t elt_typ = void_type;
         if (is_fat_pointer_type_elt(old_typ, &elt_typ)) {
-          _ change;
+          exp_t fn_e;
           switch (popt->v) {
-            case Plus:
-              change = e2;
-              break;
-            case Minus:
-              change = set_type(prim1_exp(Minus, e2, DL), sint_type);
-              break;
-            default:
-              toc_impos("bad t ? pointer arithmetic");
+            case Plus: fn_e = _fat_ptr_inplace_plus_e; break;
+            case Minus: fn_e = _fat_ptr_inplace_minus_e; break;
+            default: toc_impos("bad t ? pointer arithmetic");
           }
           done = true;
-          // FIX: Is e1 definitely still an lvalue? Probably not!!
-          let fn_e = _fat_ptr_inplace_plus_e;
-          e->r     = fncall_exp_r(fn_e, push_address_exp(e1), sizeoftype_exp(typ_to_c(nv->ctxt, elt_typ), DL),
-                              change);
+          e->r = fncall_exp_r(fn_e, push_address_exp(e1),
+                              sizeoftype_exp(typ_to_c(nv->ctxt, elt_typ), DL), e2);
         } else if (is_zero_pointer_type_elt(old_typ, &elt_typ))
           // We're doing x += e where x is a zero-terminated pointer.
           // Make sure we don't run off the end.
@@ -2057,6 +2096,11 @@ void exp_to_c(env_t nv, exp_t e) {
             default:
               toc_impos("bad zero-terminated pointer arithmetic");
           }
+      }
+      if (!done && e1_poly && popt != NULL && is_integral_type(e1_old_typ)) {
+        e->r = poly_integer_update(nv->ctxt, e1, typ_to_c(nv->ctxt, e1_old_typ),
+                                    popt->v, e2, false);
+        done = true;
       }
       if (!done) {
         // this cast is necessary to avoid gcc warnings
@@ -2088,12 +2132,47 @@ void exp_to_c(env_t nv, exp_t e) {
       exp_to_c(nv, e2);
       break;
     case &FnCall_e(e1, es, NULL, _):
-      type_t e1_typ = (type_t)e1->topt;
-      exp_to_c(nv, e1);
-      did_inserted_checks = true;
-      if (do_null_check(e))
-        e1->r = fncall_exp_dl(_check_null_e, deep_copy(e1))->r;
-      List::iter_c(exp_to_c, nv, es);
+      // Calling an instantiated polymorphic definition through a cast
+      // prototype is not C ABI adaptation. Call its actual erased prototype,
+      // convert the arguments, and convert the result instead.
+      exp_opt_t erased = NULL;
+      switch (e1->r) {
+        case &Instantiate_e(raw, _): erased = raw; break;
+        default: break;
+      }
+      if (erased != NULL) {
+        let callee = (exp_t)erased;
+        exp_to_c(nv, callee);
+        type_t ft = compress((type_t)callee->topt);
+        if (is_pointer_type(ft)) ft = compress(pointer_elt_type(ft));
+        switch (ft) {
+          case &FnType(fi):
+            let formals = fi.args;
+            for (let actuals = es; actuals != NULL; actuals = actuals->tl) {
+              let arg = actuals->hd;
+              exp_to_c(nv, arg);
+              if (formals != NULL) {
+                let expected = (*formals->hd)[2];
+                if (Tcutil::typecmp(expected, (type_t)arg->topt) != 0)
+                  actuals->hd = cast_it(expected, arg);
+                formals = formals->tl;
+              }
+            }
+            did_inserted_checks = true;
+            if (do_null_check(e))
+              callee->r = fncall_exp_dl(_check_null_e, deep_copy(callee))->r;
+            let call = set_type(fncall_exp(callee, es, DL), fi.ret_type);
+            e->r = Tcutil::typecmp(fi.ret_type, new_typ) == 0 ? call->r : cast_it_r(new_typ, call);
+            break;
+          default: toc_impos("instantiated call has no function type");
+        }
+      } else {
+        exp_to_c(nv, e1);
+        did_inserted_checks = true;
+        if (do_null_check(e))
+          e1->r = fncall_exp_dl(_check_null_e, deep_copy(e1))->r;
+        List::iter_c(exp_to_c, nv, es);
+      }
       break;
     case &FnCall_e(e1, es, &VarargCallInfo{num_varargs, injectors, vai}, _):
       // if vai->inject:
@@ -2441,9 +2520,7 @@ void exp_to_c(env_t nv, exp_t e) {
       exp_to_c(nv, e1);
       set_lhs(nv, false);
       if (!is_lvalue(e1)) {
-        lvalue_assign(e1, NULL, address_lvalue, true);
-        // the wrong cast got pushed out, so as a kludge, just re-cast
-        e->r = cast_it_r(typ_to_c(nv->ctxt, (type_t)old_typ), e1);
+        e->r = cast_it_r(typ_to_c(nv->ctxt, (type_t)old_typ), push_address_exp(e1));
       } else if (Kinds::kind_leq(&Kinds::ak, type_kind((type_t)e1->topt)))
         // we could be taking the address of an abstract member, so insert a
         // cast
@@ -2642,9 +2719,16 @@ void exp_to_c(env_t nv, exp_t e) {
         exp_to_c(nv, e1);
       break;
 
-    case &AnonStruct_e(st, _, dles):  // note: no support for struck hacks
-      for (let dles2 = dles; dles2 != NULL; dles2 = dles2->tl)
-        exp_to_c(nv, (*dles2->hd)[1]);
+    case &AnonStruct_e(st, is_tuple, dles):  // note: no support for struct hacks
+      for (let dles2 = dles; dles2 != NULL; dles2 = dles2->tl) {
+        let value = (*dles2->hd)[1];
+        bool word_field = is_tuple && tuple_word_field((type_t)value->topt);
+        exp_to_c(nv, value);
+        if (word_field) {
+          value->r = cast_it_r(void_star_type(nv->ctxt), deep_copy(value));
+          value->topt = void_star_type(nv->ctxt);
+        }
+      }
       let strct_typ = typ_to_c(nv->ctxt, old_typ);
       e->topt       = strct_typ;
       if (!is_toplevel(nv))
@@ -3082,7 +3166,10 @@ using Tcpat {
             set_type(v, tagged_union_field_struct(ctxt, at, f));
             v = member_exp(v, val_sp, DL);
           }
-          v = set_type(v, typ_to_c_array(ctxt, res_type));
+          if (is_poly_field(at, f) && !is_void_star_or_boxed_tvar(res_type))
+            v = cast_it(typ_to_c_array(ctxt, res_type), set_type(v, void_star_type(ctxt)));
+          else
+            v = set_type(v, typ_to_c_array(ctxt, res_type));
           break;
       }
     }
@@ -3445,6 +3532,7 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
       type_t atype = (type_t)topt;
       list_t<aggrfield_t> fields;
       bool is_tagged = false;
+      bool tuple_slots = false;
       switch (compress(atype)) {
         case &AppType(&AggrCon(info), _):
           let ad    = get_known_aggrdecl(info);
@@ -3452,6 +3540,7 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
           is_tagged = ad->impl->tagged;
           break;
         case &AnonAggrType(ak, is_tuple, fs):
+          tuple_slots = is_tuple;
           fields = fs;
           break;
         default:
@@ -3467,6 +3556,7 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
         let t2      = (type_t)p2->topt;
         let t2c     = typ_to_c_array(ctxt, t2);
         let ftype   = lookup_field(fields, f)->type;
+        if (tuple_slots && tuple_word_field(ftype)) ftype = void_star_type(ctxt);
         let lmemexp = member_exp(lpath, f, DL);
         let rmemexp = member_exp(rpath, f, DL);
         // tagged unions require an extra .val
@@ -4819,9 +4909,12 @@ toc_context_t Toc_Ctx_create() {
   _get_zero_arr_size_char_pr.f0.C_n           = NULL;
   _get_zero_arr_size_other_pr.f0.C_n          = NULL;
   _fat_ptr_plus_pr.f0.C_n                     = NULL;
+  _fat_ptr_minus_pr.f0.C_n = NULL;
+  _fat_ptr_diff_pr.f0.C_n = NULL;
   _zero_arr_plus_char_pr.f0.C_n               = NULL;
   _zero_arr_plus_other_pr.f0.C_n              = NULL;
   _fat_ptr_inplace_plus_pr.f0.C_n             = NULL;
+  _fat_ptr_inplace_minus_pr.f0.C_n = NULL;
   _zero_arr_inplace_plus_char_pr.f0.C_n       = NULL;
   _zero_arr_inplace_plus_other_pr.f0.C_n      = NULL;
   _fat_ptr_inplace_plus_post_pr.f0.C_n        = NULL;

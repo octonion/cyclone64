@@ -1,0 +1,88 @@
+Native Banshee64 / Cyclone64 ongoing goal — checkpoint 2026-11-14
+
+The user explicitly requested autonomous continuation until satisfactory
+candidates exist. The persistent goal is ACTIVE. Commits and status reports
+are checkpoints; known conversion bugs are not a reason to declare completion.
+
+Current verified progress (after fe958fa)
+- Wide pointer +, -, +=, -= and pointer differences preserve the offset width.
+  Fat-pointer arithmetic uses checked uintptr_t magnitudes, including signed
+  minima, unsigned maxima and 128-bit offsets, without creating C pointer
+  arithmetic outside an allocation. Temporary out-of-bounds addresses remain
+  reversible as required by Cyclone; address-space wrap is rejected.
+- Concrete tuples now use word slots for boxed-kind fields, matching generic
+  tuples. Reads, initializers, writes, patterns, address-taking, compound ops,
+  pre/post increment and zero-extended 32-bit scalar representations are covered.
+  C-compatible named structures keep their original field layout.
+- Generated C must be compiled with -fno-strict-aliasing: boxed word slots have
+  typed views, as already used in polymorphic named structures. The native
+  bootstrap and test tools now set this explicitly. This is a backend contract,
+  not a disabled sanitizer. C arithmetic on ints still has 32-bit semantics.
+- Direct instantiated calls now call the actual erased C prototype and convert
+  arguments/results. They no longer cast the callee to an incompatible prototype.
+  Nested numeric casts are retained instead of indiscriminately discarded.
+- Upstream cyctest: ALL TESTS PASSED using erasure-stage2, including Fn currying.
+- Eight native programs plus four overflow rejection tests: 12/12 PASS with GCC,
+  with instrumented emitted C/runtime under ASan+UBSan, and under Clang's
+  undefined/function sanitizer. The complete source compiler and stdlib have
+  not yet been validated with Clang's function sanitizer; see callback blocker.
+- erasure-stage2 vs erasure-stage3: 81/81 generated C files byte-identical.
+- Direct runtime bounds/arithmetic tests pass GCC, Clang and ASan/UBSan.
+- Early executions of newly built compiler ABIs use native/run-compiler-under-gdb.sh
+  to contain unexpected fatal signals. No global crash configuration changes.
+
+Current compilers and evidence
+  native/bootstrap/erasure-stage{1,2,3}/cyclone64
+  native/logs/erasure-stage2-probes.log
+  native/logs/erasure-stage2-cyctest.log
+  native/compiler-tests/erasure-stage2-cyctest/run.log
+  native/logs/erasure-asan-probes.log
+  native/logs/erasure-clang-probes.log
+  native/logs/erasure-clang-blockers.log
+  native/logs/erasure-convergence.json
+  native/logs/pointer-runtime-{tests,asan,clang}.log
+
+Remaining work — neither candidate is declared final
+1. generic-pointer.cyc: generic dereference reads a pointer word from a plain
+   four-byte int object. UBSan reports insufficient object space. This includes
+   the broader question of representation/stride across generic pointers and
+   arrays; fixing concrete tuple slots does not solve all erased memory views.
+   Need consistent type-aware representation or specialization, including
+   writes, escaping pointers, arrays and address-taking. Padding a reproducer
+   or disabling sanitizer checks is not a repair.
+2. generic-callback.cyc: invoke(increment,2) still casts a concrete int(int)
+   callback to void*(void*) and calls through it. Clang's function sanitizer
+   reports the mismatch. Direct calls are fixed; function values need actual
+   ABI adapters (including function values forwarded or stored by libraries).
+   Investigate adapter generation in Toc at concrete-function-to-erased-function
+   conversions, with correct handling for nonconstant function pointers. Preserve
+   closure lifetime/identity and avoid merely suppressing function sanitization.
+3. Compiler allocations still use the historical no-GC runtime and leak at exit.
+   The workstation has system BDW-GC 8.2.12, headers and pkg-config bdw-gc. A real
+   collector backend can be tested, while preserving a malloc-backed sanitizer
+   mode so heap errors remain detectable. Inspection also found nogc.c GC_realloc
+   reallocating n bytes without its header, and runtime_memory.c bounded malloc
+   narrowing size_t to unsigned, plus unchecked calloc products. These require
+   regressions and fixes, not just a collector switch. No allocator changes have
+   been made yet in this checkpoint.
+4. Audit remaining pointer-width assumptions, proof/range arithmetic, integer
+   constant folding, serialization and external ABI. Test full instrumented source
+   compiler/stdlib, and obtain a 32-bit reference if feasible (local multilib absent).
+   Old diagnostic references retain one-column fail3 difference and an expected
+   zeroptr internal exception that has now been fixed.
+5. Verify a fresh bootstrap directly from minimal checked-in stage0 after the next
+   ABI changes settle. Stage0 still has the old constant AST and tuple backend;
+   do not mix regenerated individual Long_c/tuple modules into that older ABI.
+
+Reproduction for current language checks
+  native/run-cyclone-tests.py --skip-diagnostics --stage-dir native/bootstrap/erasure-stage3
+  native/run-cyctest.py --stage-dir native/bootstrap/erasure-stage3
+  native/run-cyclone-tests.py --skip-diagnostics --cc clang \
+    --stage-dir native/bootstrap/erasure-stage3 --probe-dir native/cyclone-blockers \
+    --output native/bootstrap/erasure-stage3/clang-blockers \
+    --cflags '-O1 -g -fsanitize=address,undefined,function -fno-sanitize-recover=all'
+
+The two original blocker files generic-tuple.cyc and pointer-add.cyc now pass.
+They remain in the blocker directory alongside the new failing regressions to
+show progress and prevent the original bugs from returning. GCC-only success
+must not conceal Clang-detected callback UB.

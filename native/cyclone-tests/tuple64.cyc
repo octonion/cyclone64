@@ -1,0 +1,41 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `b second($(`a,`b) @p) { return (*p)[1]; }
+static bool same_second($(`a,`b) @p, `b value) { return (*p)[1]==value; }
+static void replace($(`a,`b) @p, `b x) { (*p)[1]=x; }
+static $(`b,`a) reverse($(`a,`b) p) { return $(p[1],p[0]); }
+static $(int,int) global_pair=$(4,-5);
+struct C_pair { int a; int b; };
+int main(int argc, string_t ?argv) {
+  $(int,int) pair=$(1,2);
+  if (sizeof(pair)!=2*sizeof(void *) || sizeof(struct C_pair)!=2*sizeof(int)) return 1;
+  if (second(&pair)!=2 || second(&global_pair)!=-5) return 2;
+  replace(&pair,-3);
+  if (pair[1]!=-3 || pair[0]!=1) return 3;
+  pair[1]=7;
+  if (second(&pair)!=7) return 4;
+  pair[1]+=2;
+  if (second(&pair)!=9) return 5;
+  int @address=&pair[1];
+  *address=-11;
+  if (second(&pair)!=-11) return 6;
+  let $(x,y)=pair;
+  if (x!=1 || y!=-11) return 7;
+  $(int,int) swapped=reverse(pair);
+  if (swapped[0]!=-11 || swapped[1]!=1) return 8;
+  region r;
+  $(int,int) ?pairs=rnew(r) {$(10,20),$(30,-40)};
+  if (second(&pairs[1])!=-40 || numelts(pairs)!=2) return 9;
+  replace(&pairs[0],-50);
+  if (pairs[0][1]!=-50 || pairs[1][0]!=30) return 10;
+  unsigned int u=0xffffffffU;
+  $(unsigned int,int) counter=$(u,0);
+  if (counter[0]++ != u || counter[0]!=0U) return 11;
+  if (++counter[0]!=1U || counter[0]--!=1U || --counter[0]!=u) return 12;
+  counter[0] += 2U;
+  if (counter[0]!=1U) return 13;
+  replace(&pair,-1);
+  *address=0;
+  if (!same_second(&pair,0)) return 14;
+  return 0;
+}

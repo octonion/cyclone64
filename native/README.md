@@ -1,5 +1,11 @@
 # Native LP64 work on seymour
 
+The autonomous conversion goal is active. See [STATUS.txt](STATUS.txt) for the
+2026-11-14 checkpoint, current passing suites, and newly isolated generic-memory
+and callback blockers. The material below records the earlier `fe958fa` baseline;
+its original pointer-addition and tuple/currying failures have since been fixed.
+
+
 Experimental conversion of TokTok/cyclone, based on
 `c19c449365671fa10acad6307a95ffffae86dc69`, isolated on `native-lp64-seymour`.
 No prior LP64 kit was used: `/mnt/data` did not exist on this workstation.

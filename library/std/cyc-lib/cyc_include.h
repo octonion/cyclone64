@@ -269,36 +269,57 @@ void *_zero_arr_inplace_plus_post_other_fn(unsigned, void **, ptrdiff_t, const c
     _ans;                                                                              \
   })
 
-#define _get_fat_size(arr, elt_sz)                                                                \
-  ({                                                                                              \
-    struct _fat_ptr _arr = (arr);                                                                 \
-    unsigned char *_arr_curr = _arr.curr;                                                         \
-    unsigned char *_arr_last = _arr.last_plus_one;                                                \
-    (_arr_curr < _arr.base || _arr_curr >= _arr_last) ? 0 : ((_arr_last - _arr_curr) / (elt_sz)); \
-  })
+/* Cyclone permits temporary out-of-bounds fat pointers (p+11-10).
+ * Keep their address arithmetic in uintptr_t, without C out-of-object pointer
+ * arithmetic. Reject address-space wrap before it can alias an in-bounds slot.
+ * The subscript check remains responsible for allocation bounds. */
+#define _get_fat_size(arr, elt_sz) \
+  ({ struct _fat_ptr _gfs = (arr); size_t _gfs_sz = (elt_sz); \
+     uintptr_t _gfs_c = (uintptr_t)_gfs.curr, _gfs_b = (uintptr_t)_gfs.base, \
+               _gfs_e = (uintptr_t)_gfs.last_plus_one; \
+     (!_gfs_sz || _gfs_c < _gfs_b || _gfs_c >= _gfs_e) ? (size_t)0 : \
+       (size_t)((_gfs_e - _gfs_c) / _gfs_sz); })
 
-#define _fat_ptr_plus(arr, elt_sz, change)      \
-  ({                                            \
-    struct _fat_ptr _ans = (arr);               \
-    ptrdiff_t _change = (change);               \
-    if (_ans.curr) {                            \
-      _ans.curr += _ptr_offset(elt_sz, change); \
-    }                                           \
-    _ans;                                       \
-  })
+#define _fat_ptr_shift(arr, elt_sz, change, subtract) \
+  ({ struct _fat_ptr _fps = (arr); size_t _fps_sz = (elt_sz); \
+     __auto_type _fps_i = (change); int _fps_sub = (subtract); \
+     if (_fps.curr) { \
+       int _fps_neg = _fps_i < 0; \
+       /* -(i+1) avoids overflowing on a signed minimum. */ \
+       __auto_type _fps_m = _fps_neg ? -(_fps_i + 1) : _fps_i; \
+       if (!_fps_sz || _fps_m > UINTPTR_MAX - (unsigned)_fps_neg) \
+         _throw_arraybounds(); \
+       uintptr_t _fps_mag = (uintptr_t)_fps_m + _fps_neg; \
+       uintptr_t _fps_addr = (uintptr_t)_fps.curr; \
+       int _fps_back = _fps_neg != _fps_sub; \
+       uintptr_t _fps_room = _fps_back ? _fps_addr : UINTPTR_MAX - _fps_addr; \
+       if (_fps_mag > _fps_room / _fps_sz) _throw_arraybounds(); \
+       uintptr_t _fps_delta = _fps_mag * _fps_sz; \
+       _fps.curr = (unsigned char *)(_fps_back ? _fps_addr - _fps_delta : \
+                                               _fps_addr + _fps_delta); \
+     } \
+     _fps; })
+#define _fat_ptr_plus(arr, elt_sz, change) _fat_ptr_shift(arr, elt_sz, change, 0)
+#define _fat_ptr_minus(arr, elt_sz, change) _fat_ptr_shift(arr, elt_sz, change, 1)
+#define _fat_ptr_inplace_shift(arr_ptr, elt_sz, change, subtract, post) \
+  ({ struct _fat_ptr *_fpis_p = (arr_ptr); struct _fat_ptr _fpis_old = *_fpis_p; \
+     struct _fat_ptr _fpis_new = _fat_ptr_shift(_fpis_old, elt_sz, change, subtract); \
+     *_fpis_p = _fpis_new; (post) ? _fpis_old : _fpis_new; })
 #define _fat_ptr_inplace_plus(arr_ptr, elt_sz, change) \
-  ({                                                   \
-    struct _fat_ptr *_arr_ptr = (arr_ptr);             \
-    _arr_ptr->curr += _ptr_offset(elt_sz, change);     \
-    *_arr_ptr;                                         \
-  })
+  _fat_ptr_inplace_shift(arr_ptr, elt_sz, change, 0, 0)
+#define _fat_ptr_inplace_minus(arr_ptr, elt_sz, change) \
+  _fat_ptr_inplace_shift(arr_ptr, elt_sz, change, 1, 0)
 #define _fat_ptr_inplace_plus_post(arr_ptr, elt_sz, change) \
-  ({                                                        \
-    struct _fat_ptr *_arr_ptr = (arr_ptr);                  \
-    struct _fat_ptr _ans = *_arr_ptr;                       \
-    _arr_ptr->curr += _ptr_offset(elt_sz, change);          \
-    _ans;                                                   \
-  })
+  _fat_ptr_inplace_shift(arr_ptr, elt_sz, change, 0, 1)
+#define _fat_ptr_diff(a, b, elt_sz) \
+  ({ struct _fat_ptr _fpd_a = (a), _fpd_b = (b); size_t _fpd_sz = (elt_sz); \
+     uintptr_t _fpd_x = (uintptr_t)_fpd_a.curr, _fpd_y = (uintptr_t)_fpd_b.curr; \
+     int _fpd_neg = _fpd_x < _fpd_y; \
+     uintptr_t _fpd_mag = _fpd_neg ? _fpd_y - _fpd_x : _fpd_x - _fpd_y; \
+     if (!_fpd_sz) _throw_arraybounds(); \
+     uintptr_t _fpd_q = _fpd_mag / _fpd_sz; \
+     if (_fpd_q > (uintptr_t)PTRDIFF_MAX + _fpd_neg) _throw_arraybounds(); \
+     _fpd_neg && _fpd_q ? -(ptrdiff_t)(_fpd_q - 1) - 1 : (ptrdiff_t)_fpd_q; })
 
 // Not a macro since initialization order matters. Defined in runtime_zeroterm.c.
 struct _fat_ptr _fat_ptr_decrease_size(struct _fat_ptr, size_t sz, size_t numelts);

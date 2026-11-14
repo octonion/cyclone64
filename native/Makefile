@@ -28,7 +28,7 @@ check: $(TESTS)
 CYC_SOURCES := $(filter-out stage0/library/compiler/config.c,$(wildcard stage0/library/compiler/*.c stage0/library/std/*.c stage0/library/std/libc/*.c library/runtime/*.c)) library/compiler/inference/cycinf.c stage0/tools/cyclone/cyclone.c
 CYC_OBJECTS := $(patsubst %.c,$(BUILD)/cyclone/%.o,$(CYC_SOURCES))
 # Legacy generated C uses erased callback types; keep the diagnostics visible.
-CYC_FLAGS = -Wno-error=incompatible-pointer-types -Ilibrary/std/cyc-lib -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -DCYC_STATIC_MAIN
+CYC_FLAGS = -fno-strict-aliasing -Wno-error=incompatible-pointer-types -Ilibrary/std/cyc-lib -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -DCYC_STATIC_MAIN
 .PHONY: cyclone
 cyclone: $(BUILD)/cyclone64
 $(BUILD)/cyclone/%.o: %.c

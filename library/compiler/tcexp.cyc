@@ -500,8 +500,8 @@ static type_t tcPlus(Tc::tc_context_t ctx, tenv_t te, exp_t e1, exp_t e2) {
         Warn::err2(e1->loc, "can't do arithmetic on abstract pointer type");
       if (is_noalias_pointer(curr_aquals_bounds(te), t1, true))
         Warn::err2(e1->loc, "can't do arithmetic on unique pointer");
-      if (!coerce_sint_type(e2))
-        Warn::err2(e2->loc, "expecting int but found ", t2);
+      if (!is_integral_type(t2))
+        Warn::err2(e2->loc, "expecting integral pointer offset but found ", t2);
       if (!is_cvar_type(b)) {  // user constrained, or already resolved
         let eopt = get_bounds_exp(fat_bound_type, b);
         if (eopt == NULL)
@@ -565,6 +565,8 @@ static type_t tcMinus(Tc::tc_context_t ctx, tenv_t te, type_t *topt, exp_t e1, e
 
   // t1 is a pointer
   if (!is_pointer_type(t2)) {  // t2 is an arithmetic type ...
+    if (!is_integral_type(t2))
+      return expr_err(te, e2->loc, topt, "expecting integral pointer offset but found ", t2);
     // what about if topt is NULL?? ... treating it as if it is a pointer... can
     // coerce to arith later
     if ((topt && is_pointer_type(*topt)) ||
@@ -608,7 +610,7 @@ static type_t tcMinus(Tc::tc_context_t ctx, tenv_t te, type_t *topt, exp_t e1, e
 
   //(fat - thin), or (thin - fat) requires coercing the fat to a thin
   if (!(is_fat_pointer_type(t1) ^ is_fat_pointer_type(t2)))
-    return sint_type;
+    return sizeof(void *) > sizeof(int) ? slong_type : sint_type;
 
   if (is_fat_pointer_type(t1)) {
     unchecked_cast(e1,
@@ -622,7 +624,7 @@ static type_t tcMinus(Tc::tc_context_t ctx, tenv_t te, type_t *topt, exp_t e1, e
                    Other_coercion);
   }
 
-  return sint_type;
+  return sizeof(void *) > sizeof(int) ? slong_type : sint_type;
 }
 
 static type_t tcCmpBinop(Tc::tc_context_t ctx, tenv_t te, seg_t loc, exp_t e1, exp_t e2) {

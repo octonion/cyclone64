@@ -22,7 +22,7 @@ sources += [pathlib.Path(s) for s in ['native/generated/lex.cyc','native/generat
 def compile_source(src):
     dest=out/src.with_suffix('');dest.parent.mkdir(parents=True,exist_ok=True)
     pre=str(dest)+'.cyp'; gen=str(dest)+'.c'; obj=str(dest)+'.o'
-    steps=[('preprocess',[a.cc,'-E','-x','c','-nostdinc','-Inative/generated','-Inative/include','-Inative/compat','-isystem','native/generated/libc',str(src),'-o',pre]),('translate',[compiler,'--cifc-inst-tvar','--better-widen','-o',gen,pre]),('compile',[a.cc,'-std=gnu11','-march=native',*shlex.split(a.cflags),'-Wno-error=incompatible-pointer-types','-Ilibrary/std/cyc-lib','-c',gen,'-o',obj])]
+    steps=[('preprocess',[a.cc,'-E','-x','c','-nostdinc','-Inative/generated','-Inative/include','-Inative/compat','-isystem','native/generated/libc',str(src),'-o',pre]),('translate',[compiler,'--cifc-inst-tvar','--better-widen','-o',gen,pre]),('compile',[a.cc,'-std=gnu11','-march=native','-fno-strict-aliasing',*shlex.split(a.cflags),'-Wno-error=incompatible-pointer-types','-Ilibrary/std/cyc-lib','-c',gen,'-o',obj])]
     for phase,cmd in steps:
         if not run(cmd,str(dest)+'-'+phase+'.log'):
             result=f'{src}: {phase} FAIL';break

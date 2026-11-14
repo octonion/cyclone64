@@ -1,0 +1,10 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `a read_value(`a @p) { return *p; }
+static void write_value(`a @p, `a value) { *p=value; }
+int main(int argc, string_t ?argv) {
+  int value=123;
+  if (read_value(&value)!=123) return 1;
+  write_value(&value,-7);
+  return value==-7 ? 0 : 2;
+}

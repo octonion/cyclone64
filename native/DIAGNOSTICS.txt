@@ -6,9 +6,12 @@ Three historical references were updated after comparing the complete output:
    now says "expecting an integral array bound" instead of "expecting unsigned
    int", reflecting the intentional acceptance of wider integral counts before
    checked allocation. All other fail1 diagnostics remain unchanged.
-2. fail3.cyc:150: the aliased pattern is still rejected. The reported column is
-   now 26, the actual start of "unew", instead of the old off-by-one column 27.
-   The error wording and all other diagnostics remain unchanged.
+2. fail3.cyc:150: the aliased pattern is still rejected. GCC and Clang expand
+   the unew macro differently in preprocessed source: their diagnostics report
+   columns 26 and 27 respectively. The GCC reference uses 26; the explicit
+   native/diagnostics/fail3.clang.ref retains 27. The runner records and detects
+   the preprocessor version and otherwise compares the complete text exactly.
+   This is not a changed semantic diagnostic or a blanket column normalization.
 3. zeroptr.cyc is valid: returning integer zero through a pointer typedef now
    compiles instead of crashing the compiler with an internal Null_Exception.
    Its expected output is empty and expected exit is zero. null-alias.cyc checks
@@ -18,7 +21,8 @@ The runner now checks exit status as well as exact text, so a silent compiler
 failure cannot pass an empty reference. It also applies explicit compiler flags
 consistently to diagnostic, rejection and executable inputs.
 
-All eight exact diagnostic references pass with wide-proof4. Before/after logs:
+All eight exact diagnostic references pass with wide-proof4 under GCC. The
+Clang variant is checked separately with the fully instrumented compiler. Before/after logs:
   native/compiler-tests/wide-proof4-diagnostics/*.diff
   native/compiler-tests/wide-proof4-diagnostics-updated/results.txt
 Original expectations remain in Git history and the detached historical ILP32

@@ -32,13 +32,19 @@ def run(cmd, label):
         return proc
     except subprocess.TimeoutExpired:
         raise SystemExit('TIMEOUT: ' + label)
+diagnostic_variant = ''
+if not a.skip_diagnostics:
+    version = run([a.cc, '--version'], 'diagnostic-preprocessor-version')
+    if version.returncode: raise SystemExit('cannot identify diagnostic preprocessor')
+    if 'clang' in version.stdout.lower(): diagnostic_variant = 'clang'
 for ref in ([] if a.skip_diagnostics else sorted(pathlib.Path('testsuite/compiler').glob('*.ref'))):
     src = ref.with_suffix('.cyc'); pre = out / (src.stem + '.cyp')
     q = run([a.cc, '-nostdinc', '-x', 'c', '-E', '-isystem', 'testsuite/compiler/lib', src, '-o', pre], src.stem + '-cpp')
     if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue
     q = run([compiler, *shlex.split(a.compiler_flags), '--manyerrors', pre, '-o', '/dev/null'], src.stem)
     got = (q.stdout + q.stderr).replace('testsuite/compiler/', 'cyclone/testsuite/compiler/')
-    expected = ref.read_text()
+    variant = pathlib.Path('native/diagnostics') / (ref.stem+'.'+diagnostic_variant+'.ref')
+    expected = (variant if diagnostic_variant and variant.is_file() else ref).read_text()
     (out / (src.stem + '.diff')).write_text(''.join(difflib.unified_diff(expected.splitlines(True), got.splitlines(True))))
     expected_exit = 1 if 'COMPILATION FAILED!' in expected else 0
     results.append((src.stem, 'PASS' if got == expected and q.returncode == expected_exit else f'DIFF (exit {q.returncode}, expected {expected_exit})'))

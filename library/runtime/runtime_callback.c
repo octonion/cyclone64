@@ -12,6 +12,18 @@
 #include <stddef.h>
 #include <limits.h>
 
+// libffi closures use mmap, outside LeakSanitizer's allocation graph. Each
+// cached closure is a live root and owns trampoline-table pointers in malloc
+// storage. Register precisely that live mapped record, and unregister it when
+// freed; this preserves leak detection for genuinely unreachable allocations.
+extern void __lsan_register_root_region(const void *,size_t) __attribute__((weak));
+extern void __lsan_unregister_root_region(const void *,size_t) __attribute__((weak));
+static void cb_closure_free(ffi_closure *closure) {
+  if(!closure) return;
+  if(__lsan_unregister_root_region) __lsan_unregister_root_region(closure,sizeof *closure);
+  ffi_closure_free(closure);
+}
+
 extern void *GC_malloc(size_t);
 extern void GC_free(void *);
 extern void *_throw_badalloc_fn(const char *, unsigned);
@@ -216,12 +228,13 @@ static void *cb_adapt(void *fn,const char *from_text,const char *to_text) {
   a->closure=ffi_closure_alloc(sizeof *a->closure,&a->code);
   if(!a->closure || ffi_prep_closure_loc(a->closure,&a->to->cif,cb_invoke,a,a->code)!=FFI_OK)
     cb_error("closure allocation failed");
+  if(__lsan_register_root_region) __lsan_register_root_region(a->closure,sizeof *a->closure);
   pthread_mutex_lock(&cb_lock);
   for(struct cb_adapter *p=cb_cache;p;p=p->next)
     if(p->original==fn && !strcmp(p->from->signature,from_text) && !strcmp(p->to->signature,to_text)) {
       void *code=p->code;
       pthread_mutex_unlock(&cb_lock);
-      if(a->closure) ffi_closure_free(a->closure);
+      if(a->closure) cb_closure_free(a->closure);
     cb_free_type(a->from); cb_free_type(a->to); GC_free(a);
       return code;
     }
@@ -262,7 +275,7 @@ void _cyc_callback_shutdown(void) {
   pthread_mutex_lock(&cb_lock);
   while(cb_cache) {
     struct cb_adapter *a=cb_cache; cb_cache=a->next;
-    if(a->closure) ffi_closure_free(a->closure);
+    if(a->closure) cb_closure_free(a->closure);
     cb_free_type(a->from); cb_free_type(a->to); GC_free(a);
   }
   pthread_mutex_unlock(&cb_lock);

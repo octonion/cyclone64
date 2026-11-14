@@ -35,8 +35,17 @@ Precise remaining failures:
    descriptions is not implemented. Cache/closure records live for process
    lifetime; explicit shutdown is only safe when all callers have ceased.
 4. Production GC heap objects do not have malloc-ASan redzones. Direct allocator
-   and callback units cover those with malloc instrumentation. Full ASan system
-   GC compiler build is in progress; no leak suppressions have been added.
+   and callback units cover those with malloc instrumentation. The full ASan
+   system-GC compiler, source stdlib/runtime and upstream suite now PASS.
+   Live mmap-backed libffi closure records are registered as LSan roots and
+   unregistered on destruction; an intentional 73-byte leak remains detected.
+   BDW-GC 8.2.12 cannot scan ASan fake stacks. The system-GC bridge supplies
+   upstream's detect_stack_use_after_return=0 default (with detect_leaks=true),
+   confirmed from ASan's option report. This avoids premature collection of
+   live objects. Malloc-backed units keep use-after-return instrumentation.
+   See https://github.com/bdwgc/bdwgc/blob/v8.2.12/os_dep.c#L479-L500.
+   Applications with their own ASan defaults can build the bridge with
+   CYC_CUSTOM_ASAN_DEFAULTS, but must preserve this collector constraint.
 
 A historical 32-bit reference is now available in ../cyclone-reference32,
 at c19c449365671fa10acad6307a95ffffae86dc69, with a clean source worktree.
@@ -46,6 +55,12 @@ and generic pointer/callback/tuple behavior probes pass. Native-only overflow
 rejection wording is different and is not included in those common probes.
 
 Latest evidence:
+  native/logs/ffi-gc-stack-cyctest2.log
+  native/compiler-tests/ffi-gc-stack-cyctest2/run.log
+  native/logs/ffi-root-asan-probes.log
+  native/logs/ffi-root-results.json (shutdown/live cache/leak negative control)
+  native/logs/ffi-asan-options.log
+  native/logs/ffi-asan-gc-collection.log
   native/logs/ffi-equal-convergence.json
   native/logs/ffi-equal8-cyctest.log
   native/compiler-tests/ffi-equal8-cyctest/run.log

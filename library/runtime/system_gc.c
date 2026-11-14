@@ -5,6 +5,21 @@
 #include <stdio.h>
 #include "cyc_include.h"
 
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+#if (defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)) && !defined(CYC_CUSTOM_ASAN_DEFAULTS)
+/* BDW-GC 8.2.12 scans real stacks, not ASan's fake stacks. Match upstream's
+ * os_dep.c defaults in the executable when using the unsanitized system DSO:
+ * https://github.com/bdwgc/bdwgc/blob/v8.2.12/os_dep.c#L479-L500
+ * Heap/stack bounds, use-after-free and leak checking remain enabled. The
+ * malloc-backed test configuration retains use-after-return instrumentation.
+ */
+const char *__asan_default_options(void) {
+  return "allow_user_segv_handler=1:detect_stack_use_after_return=0";
+}
+#endif
+
 void *cyc_vmalloc(size_t size) {
   void *p = GC_malloc(size);
   if (!p) _throw_badalloc();

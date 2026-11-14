@@ -29,7 +29,10 @@ static void *thread(void *unused) {
   }
   return NULL;
 }
-int main(void) {
+__attribute__((noinline)) static void leak_probe(void) {
+  volatile unsigned char *p=malloc(73); p[0]=42;
+}
+int main(int argc,char **argv) {
   void *p=_cyc_callback_adapt((void *)negate,"Fi(i)","Fp1:v(p1:v)");
   CHECK((uintptr_t)((void *(*)(void *))p)((void *)(uintptr_t)7)==0xfffffff9U);
   CHECK(p==_cyc_callback_adapt((void *)negate,"Fi(i)","Fp1:v(p1:v)"));
@@ -66,6 +69,7 @@ int main(void) {
   CHECK(!_cyc_callback_equal(neg,(void *)invert));
   CHECK(_cyc_callback_equal(NULL,NULL));
   CHECK(!_cyc_callback_equal(NULL,neg));
-  _cyc_callback_shutdown();
+  if(argc>1 && !strcmp(argv[1],"--leak-probe")) leak_probe();
+  if(!(argc>1 && !strcmp(argv[1],"--keep-cache"))) _cyc_callback_shutdown();
   puts("libffi callback ABI: signed/unsigned, long, pointers, aggregate, higher order, identity, threads: PASS");
 }

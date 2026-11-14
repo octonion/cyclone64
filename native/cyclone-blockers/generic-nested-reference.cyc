@@ -1,0 +1,11 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `a read_twice(`a @ @p) { return **p; }
+static void write_twice(`a @ @p,`a value) { **p=value; }
+int main(int argc,string_t ?argv) {
+  int value=123;
+  int @p=&value;
+  if(read_twice(&p)!=123) return 1;
+  write_twice(&p,-7);
+  return value==-7 && p==&value ? 0 : 2;
+}

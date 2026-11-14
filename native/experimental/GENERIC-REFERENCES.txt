@@ -1,0 +1,42 @@
+Generic-reference work, not a completed compiler implementation
+
+Confirmed native regressions are in native/cyclone-blockers/generic-{pointer,
+array,nested-reference,escaping-reference}.cyc. The 32-bit reference uses the
+same sources via native/reference-tests. Keep this behavioral comparison.
+
+polyref.c/.h is a malloc-ASan-tested prototype, not linked into Cyclone64.
+Its reference objects retain the original address, bounds, element width and
+nested storage layout. Loads/stores use the original object; there is no
+copy-in/copy-out temporary. Tests cover escaping references, 4-byte int arrays,
+word-sized values, nested raw/fat/wrapped references, bounds and arithmetic.
+The current C interface assumes caller-owned layout records outlive references.
+
+Required work before integration:
+- Reify boxed type layouts where generic code allocates or uses sizeof(T).
+  Reference wrappers alone are insufficient: Array::from_list<int>, for example,
+  must allocate an array with the requested concrete layout. Erasing T to an
+  8-byte word and only wrapping input references does not solve returned arrays.
+- Distinguish logical concrete type layout from physical canonical word slots
+  (generic locals, named aggregate fields and tuple fields). Capture actual
+  storage before Toc casts erase it. Preserve mutable aliasing and identity.
+- Generic Any-kind pointers are opaque and cannot be dereferenced/arithmetic'd;
+  they can retain their plain void* ABI. Boxed/memory-kind generic references
+  need width/stride information. Concrete C ABI pointers remain native pointers.
+- Thread layout information through instantiation, generic call/return ABI,
+  callback conversion (including libffi argument/result descriptors), field
+  initialization/read/write/address-taking, casts, and allocation lowering.
+- Lower generic dereference/subscript/update, &*, pointer increments/difference,
+  nullable tests and numelts using actual storage stride and preserved bounds.
+- Handle returning newly allocated generic arrays without exposing word-stride
+  storage as native int*. Test C interop and post-return mutations, not only
+  scalar readback. Avoid a global address registry or padding concrete ints.
+- Validate full self-hosted ABI stages; never mix individual modules across a
+  representation change. Keep an older compiler to generate the first stage.
+
+The prototype deliberately does not claim to settle descriptor interning,
+recursive type schemas, generic function type arguments, or compiler lowering.
+Run it with:
+  make -f native/Makefile BUILD=native/ffi-unit CC=clang \
+    CFLAGS='-O1 -g -fsanitize=address,undefined,function -fno-sanitize-recover=all' \
+    native/ffi-unit/check-polyref
+  native/ffi-unit/check-polyref

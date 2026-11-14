@@ -1,0 +1,14 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `a read_at(`a ?p, unsigned long i) { return p[i]; }
+static void write_at(`a ?p,unsigned long i,`a value) { p[i]=value; }
+static `a ?`r tail(`a::B ?`r p,unsigned long n) { return p+n; }
+int main(int argc,string_t ?argv) {
+  region r;
+  int ?a=rnew(r) {10,20,30};
+  if(read_at(a,1)!=20) return 1;
+  write_at(a,1,-7);
+  if(a[0]!=10 || a[1]!=-7 || a[2]!=30) return 2;
+  let b=tail(a,1);
+  return numelts(b)==2 && b[0]==-7 && b[1]==30 ? 0 : 3;
+}

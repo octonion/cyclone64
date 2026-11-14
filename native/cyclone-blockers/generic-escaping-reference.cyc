@@ -1,0 +1,15 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static `a @`r keep(`a @`r p) { return p; }
+static `a @`r element(`a::B ?`r p,unsigned long i) { return &p[i]; }
+int main(int argc,string_t ?argv) {
+  int value=123;
+  let saved=keep(&value);
+  *saved=-7;
+  if(saved!=&value || value!=-7) return 1;
+  region r;
+  int ?a=rnew(r) {10,20,30};
+  let middle=element(a,1);
+  *middle=-9;
+  return middle==&a[1] && a[0]==10 && a[1]==-9 && a[2]==30 ? 0 : 2;
+}

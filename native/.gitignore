@@ -11,3 +11,6 @@
 /__pycache__/
 /compiler-checks-build/
 /sysgc*/
+/ffi*/
+
+/scratch/

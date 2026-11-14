@@ -1,0 +1,37 @@
+Historical ILP32 reference — isolated local build
+
+Source commit: c19c449365671fa10acad6307a95ffffae86dc69
+Checkout: ../cyclone-reference32 (detached clean worktree)
+Output: ../reference32-build/cyclone32
+Compiler wrapper: ../reference32-sysroot/cc32
+Sysroot: ../reference32-sysroot/root
+
+Packages downloaded using apt download (not installed):
+lib32gcc-15-dev_15.2.0-16ubuntu1_amd64.deb sha256=8b25c4ac3dc9bd040d0f77f3dc9b72549f3b6fbed4e55138bd51994f9895518d
+lib32gcc-s1_16-20260322-1ubuntu1_amd64.deb sha256=65aa3967807849071674146a8237c3a44393dfca10722f9d7d8e80c8831de8aa
+libc6-dev-i386_2.43-2ubuntu2.7_amd64.deb sha256=5b6c7b8f79ebbce5cb1ec080569352afbb63606046e80e474627321f43d5d0a2
+libc6-i386_2.43-2ubuntu2.7_amd64.deb sha256=c7fae70ad8919d1130d7b3d83c624dbf10f427e1849032ac532ef514d22460f9
+
+Extract each using dpkg-deb -x into the sysroot. Recreate the merged-/usr link
+root/lib -> usr/lib, and root/usr/lib/ld-linux.so.2 -> ../lib32/ld-linux.so.2.
+The wrapper uses host GCC 15 and matching host shared glibc headers; this is a
+local reference environment, not a relocatable redistributable toolchain.
+Wrapper:
+#!/bin/sh
+root=$(CDPATH= cd -- "$(dirname -- "$0")/root" && pwd)
+exec gcc-15 -m32 --sysroot="$root" -B"$root/usr/lib/gcc/x86_64-linux-gnu/15/32/" -B"$root/usr/lib32/" -isystem "$root/usr/include" -isystem /usr/include/x86_64-linux-gnu -isystem /usr/include -L"$root/usr/lib32" -Wl,--dynamic-linker="$root/usr/lib32/ld-linux.so.2" -Wl,-rpath="$root/usr/lib32" "$@"
+
+Reproduce from the native checkout:
+  python3 native/build-reference32.py --checkout ../cyclone-reference32 \
+    --cc ../reference32-sysroot/cc32 --out ../reference32-build
+  ln -s . ../reference32-build/cyclone
+  CYCLONE_COMPILER=$PWD/../reference32-build/cyclone32 \
+    native/run-cyclone-tests.py --compiler native/run-compiler-under-gdb.sh \
+    --skip-diagnostics --skip-rejections --cc ../reference32-sysroot/cc32 \
+    --build ../reference32-build --probe-dir native/reference-tests \
+    --runtime-include ../cyclone-reference32/library/std/cyc-lib \
+    --output native/compiler-tests/reference32-common
+
+All compile/link commands and diagnostics are retained in reference32-build.
+The three common probes are symlinks to the same native blocker sources.
+They all pass at 32 bits; generic-pointer fails the 64-bit sanitizer check.

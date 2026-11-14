@@ -1,0 +1,18 @@
+#include "cyclone/library/std/core.h"
+using Core;
+typedef `b (@callback_t<`a,`b>)(`a);
+struct Holder<`a,`b> { callback_t<`a,`b> callback; };
+static int increment(int x) { return x+1; }
+static struct Holder<int,int> global_holder={.callback=increment};
+struct Factory<`a,`b> { callback_t<`a,`b> (@produce)(); };
+static callback_t<int,int> get_increment() { return increment; }
+static struct Factory<int,int> global_factory={.produce=get_increment};
+static callback_t<`a,`b> from_factory(struct Factory<`a,`b> @p) { return p->produce(); }
+int main(int argc, string_t ?argv) {
+  let f=global_holder.callback;
+  if (f(3)!=4) return 1;
+  if (f!=increment) return 2;
+  let produced=from_factory(&global_factory);
+  if (produced!=increment || produced(5)!=6) return 3;
+  return 0;
+}

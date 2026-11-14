@@ -26,7 +26,7 @@ check: $(TESTS)
 
 # Select explicitly in a fresh BUILD directory; nogc keeps ASan redzones.
 NATIVE_GC ?= nogc
-CYC_LIBS = -lbacktrace -ldl -lm -lpthread
+CYC_LIBS = -lbacktrace -ldl -lm -lpthread $(shell pkg-config --libs libffi libcrypto)
 ifeq ($(NATIVE_GC),system)
 CYC_GC_EXCLUDE = library/runtime/nogc.c
 CYC_GC_FLAGS = -DCYC_USE_SYSTEM_GC $(shell pkg-config --cflags bdw-gc)
@@ -39,10 +39,10 @@ runtime-config:
 	python3 native/runtime_build.py $(BUILD) $(NATIVE_GC)
 
 # Stage0 uses the checked-in generated C; no Bazel workspace required.
-CYC_SOURCES := $(filter-out $(CYC_GC_EXCLUDE) stage0/library/compiler/config.c,$(wildcard stage0/library/compiler/*.c stage0/library/std/*.c stage0/library/std/libc/*.c library/runtime/*.c)) library/compiler/inference/cycinf.c stage0/tools/cyclone/cyclone.c
+CYC_SOURCES := $(filter-out $(CYC_GC_EXCLUDE) stage0/library/compiler/config.c,$(wildcard stage0/library/compiler/*.c stage0/library/std/*.c stage0/library/std/libc/*.c library/runtime/*.c)) library/compiler/inference/cycinf.c library/compiler/inference/type_name.c stage0/tools/cyclone/cyclone.c
 CYC_OBJECTS := $(patsubst %.c,$(BUILD)/cyclone/%.o,$(CYC_SOURCES))
 # Legacy generated C uses erased callback types; keep the diagnostics visible.
-CYC_FLAGS = $(CYC_GC_FLAGS) -fno-strict-aliasing -Wno-error=incompatible-pointer-types -Ilibrary/std/cyc-lib -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -DCYC_STATIC_MAIN
+CYC_FLAGS = -DCYC_LIBFFI $(shell pkg-config --cflags libffi libcrypto) $(CYC_GC_FLAGS) -fno-strict-aliasing -Wno-error=incompatible-pointer-types -Ilibrary/std/cyc-lib -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -DCYC_STATIC_MAIN
 # libbacktrace's public header ships in GCC's include directory on Kubuntu.
 # Clang finds the library but needs that header path for this one source file.
 BACKTRACE_CPPFLAGS ?= -idirafter $(shell $(shell native/select-cc.sh) -print-file-name=include)
@@ -103,3 +103,11 @@ $(BUILD)/check-gc-allocation: native/compiler-checks/gc-allocation.c library/run
 $(BUILD)/check-gc-collection: native/compiler-checks/gc-collection.c library/runtime/system_gc.c library/runtime/runtime_memory.c library/runtime/bget.c library/std/cyc-lib/cyc_include.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) -DCYC_USE_SYSTEM_GC -ffunction-sections -fdata-sections -Ilibrary/std/cyc-lib $(filter %.c,$^) -Wl,--gc-sections $(LDFLAGS) $(shell pkg-config --cflags --libs bdw-gc) -o $@
+
+$(BUILD)/check-callback-ffi: native/compiler-checks/callback-ffi.c library/runtime/runtime_callback.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) -DCYC_LIBFFI $^ $(LDFLAGS) $(shell pkg-config --cflags --libs libffi) -lpthread -o $@
+
+$(BUILD)/check-type-name: native/compiler-checks/type-name.c library/compiler/inference/type_name.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) $^ $(LDFLAGS) $(shell pkg-config --cflags --libs libcrypto) -o $@

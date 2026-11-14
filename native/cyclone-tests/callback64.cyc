@@ -9,6 +9,12 @@ static unsigned invert(unsigned x) { return ~x; }
 static void assign(int @p) { *p=37; }
 static void run_action(void (@f)(`a), `a x) { f(x); }
 static int @`r identity_pointer(int @`r p) { return p; }
+typedef `b (@callback_t<`a,`b>)(`a);
+static callback_t<`a,`b> preserve(callback_t<`a,`b> f) { return f; }
+static callback_t<`a,`b> factory(callback_t<`a,`b> (@make)()) { return make(); }
+static callback_t<int,int> get_increment() { return increment; }
+static callback_t<int,int> saved=increment;
+struct CallbackHolder<`a,`b> { callback_t<`a,`b> function; };
 extern "C" unsigned long abi_echo(unsigned long);
 int main(int argc, string_t ?argv) {
   if (invoke(increment,2)!=3 || forward(negate,7)!=-7) return 1;
@@ -18,5 +24,19 @@ int main(int argc, string_t ?argv) {
   run_action(assign,&value);
   if (value!=37 || invoke(identity_pointer,&value)!=&value) return 4;
   if (invoke(abi_echo,0x123456789abcdef0UL)!=0x123456789abcdef0UL) return 5;
+  int (@selected)(int)=argc==1 ? increment : negate;
+  if (invoke(selected,11)!=12 || invoke(saved,9)!=10) return 6;
+  let restored=preserve(selected);
+  if (restored!=selected || restored(3)!=4) return 7;
+  let produced=factory(get_increment);
+  if (produced!=increment || produced(5)!=6) return 8;
+  struct CallbackHolder<int,int> holder={.function=selected};
+  if (holder.function(8)!=9) return 9;
+  holder.function=negate;
+  if (holder.function(8)!=-8) return 10;
+  let assigned=(holder.function=increment);
+  if (assigned!=increment || assigned(3)!=4) return 11;
+  int (*nullable)(int)=argc==1 ? NULL : increment;
+  try { invoke(nullable,1); return 12; } catch { default: break; }
   return 0;
 }

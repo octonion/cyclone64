@@ -1,3 +1,65 @@
+Latest checkpoint — dynamic callable ABI and stable C types (2026-11-14)
+
+Banshee64 remains a tested standalone native library candidate. The 7 native
+regressions and 8 region tests pass again with GCC 15.2. Earlier ASan/UBSan,
+Clang and GCC 14 runs are retained. Persistence is trusted same-build data;
+unsupported custom/flowrow codecs and serialize_cs are not claimed implemented.
+
+Cyclone64 is still under conversion, NOT a satisfactory final candidate:
+- Dynamic function values, generic callback fields, higher-order arguments and
+  results use a libffi ABI bridge. Constant global initializers use static C
+  wrappers registered by constructors. Equality resolves original functions.
+- Anonymous aggregate C names derive from SHA-256 of their structural fields.
+  This fixes incompatible C tags for the same logical tuple across modules.
+- Full compiler + standard library + upstream cyctest pass Clang's undefined
+  and function sanitizers. The 13 native checks pass. Callback bridge and
+  digest units pass ASan/UBSan/function, with leak checking enabled.
+- ffi-equal7 and ffi-equal8 converge: all 81 generated C files byte-identical.
+  Earlier stages differed in inferred bounds checks; only the final pair is
+  cited as convergence evidence.
+- Test/build drivers remove stale outputs and record commands. Missing compiler
+  executables fail before GDB starts; stale generated C cannot count as success.
+- New dependencies: libffi for runtime callback adaptation, libcrypto for
+  compiler-only deterministic anonymous type names. Both are explicit in
+  native runtime manifests; standalone Banshee does not depend on either.
+- Desktop coredump count remains 30, with no new reports from this work.
+
+Precise remaining failures:
+1. generic-pointer.cyc: erased void** reads/writes a plain four-byte int;
+   alignment and width are wrong. Generic arrays, stride, nested and escaping
+   pointers require a consistent representation or specialization.
+2. allocation-count.cyc: malloc/calloc/region fat-pointer counts are narrowed
+   to unsigned int before checked allocation. A count above 2^32 becomes small.
+3. Callback ABI descriptors reject unsupported unions, bitfields, int128 and
+   variadic conversions explicitly. Aggregate conversion beyond identical
+   descriptions is not implemented. Cache/closure records live for process
+   lifetime; explicit shutdown is only safe when all callers have ceased.
+4. Production GC heap objects do not have malloc-ASan redzones. Direct allocator
+   and callback units cover those with malloc instrumentation. Full ASan system
+   GC compiler build is in progress; no leak suppressions have been added.
+
+A historical 32-bit reference is now available in ../cyclone-reference32,
+at c19c449365671fa10acad6307a95ffffae86dc69, with a clean source worktree.
+Downloaded multilib packages were extracted into ../reference32-sysroot;
+nothing was installed into the workstation. Its checked-in-C compiler builds
+and generic pointer/callback/tuple behavior probes pass. Native-only overflow
+rejection wording is different and is not included in those common probes.
+
+Latest evidence:
+  native/logs/ffi-equal-convergence.json
+  native/logs/ffi-equal8-cyctest.log
+  native/compiler-tests/ffi-equal8-cyctest/run.log
+  native/logs/ffi-equal-probes.log
+  native/logs/ffi-equality-unit.log
+  native/logs/ffi-units.log
+  native/logs/ffi-banshee-regression.log
+  native/logs/ffi-static-higher.log (known allocation + pointer failures)
+  native/logs/reference32-common.log
+  native/REFERENCE32.txt
+
+The persistent goal remains ACTIVE. Older sections below are historical
+checkpoints, not the current unresolved callback status.
+
 Native Banshee64 / Cyclone64 ongoing goal — checkpoint 2026-11-14
 
 The user explicitly requested autonomous continuation until satisfactory

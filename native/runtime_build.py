@@ -21,14 +21,22 @@ def runtime_objects(build):
 def runtime_libs(build):
     return ['-lbacktrace', '-ldl', '-lm', '-lpthread', *configuration(build)['ldflags']]
 
+def compiler_libs(build):
+    return runtime_libs(build) + configuration(build).get('compiler_ldflags', [])
+
 def configure(build, backend):
     if backend not in ('nogc', 'system'):
         raise SystemExit('NATIVE_GC must be nogc or system')
     build = pathlib.Path(build)
     config = {'backend': backend, 'ldflags': [], 'cflags': []}
+    for key, flag in [('ldflags', '--libs'), ('cflags', '--cflags')]:
+        config[key] = shlex.split(subprocess.check_output(['pkg-config', flag, 'libffi'], text=True))
+    config['compiler_ldflags'] = shlex.split(subprocess.check_output(['pkg-config', '--libs', 'libcrypto'], text=True))
+    config['crypto_version'] = subprocess.check_output(['pkg-config', '--modversion', 'libcrypto'], text=True).strip()
+    config['ffi_version'] = subprocess.check_output(['pkg-config', '--modversion', 'libffi'], text=True).strip()
     if backend == 'system':
         for key, flag in [('ldflags', '--libs'), ('cflags', '--cflags')]:
-            config[key] = shlex.split(subprocess.check_output(['pkg-config', flag, 'bdw-gc'], text=True))
+            config[key] += shlex.split(subprocess.check_output(['pkg-config', flag, 'bdw-gc'], text=True))
         config['version'] = subprocess.check_output(['pkg-config', '--modversion', 'bdw-gc'], text=True).strip()
     path = build / 'runtime-config.json'
     if path.exists() and json.loads(path.read_text()) != config:

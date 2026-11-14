@@ -205,6 +205,9 @@ MAKE_VAR(_get_zero_arr_size_other);
 MAKE_VAR(_fat_ptr_plus);
 MAKE_VAR(_fat_ptr_minus);
 MAKE_VAR(_fat_ptr_diff);
+MAKE_VAR(_cyc_callback_adapt);
+MAKE_VAR(_cyc_callback_equal);
+MAKE_VAR(_cyc_callback_register_static);
 MAKE_VAR(_zero_arr_plus_char);
 MAKE_VAR(_zero_arr_plus_other);
 MAKE_VAR(_fat_ptr_inplace_plus);
@@ -441,6 +444,26 @@ static aggrdecl_t make_c_struct_defn(var_t name, list_t<aggrfield_t,`H> fs) {
                       .impl              = new AggrdeclImpl{NULL, NULL, fs, false, NULL}};
 }
 
+// C function types must use the same aggregate tags in every translation unit.
+// Counters made qvar_t and other tuples acquire incompatible C prototypes.
+extern "C" void _cyc_type_digest(const char *, unsigned long, char *);
+static stringptr_t anonymous_type_name(aggr_kind_t kind, list_t<aggrfield_t> fields) {
+  string_t description = kind == StructA ? "struct:" : "union:";
+  for (let fs = fields; fs != NULL; fs = fs->tl) {
+    let field = fs->hd;
+    description = aprintf("%s%s:%s:%u%u%u;", description, *field->name,
+                           Absynpp::typ2cstring(field->type), field->tq.real_const,
+                           field->tq.q_volatile, field->tq.q_restrict);
+    if (field->width != NULL)
+      description = aprintf("%swidth:%s;", description, Absynpp::exp2string((exp_t)field->width));
+    for (let attributes = field->attributes; attributes != NULL; attributes = attributes->tl)
+      description = aprintf("%sattr:%s;", description, Absynpp::attribute2string(attributes->hd));
+  }
+  char digest[65] @zeroterm = {for i < 64: '\0'};
+  _cyc_type_digest((const char *)description, strlen(description), digest);
+  return new (string_t) aprintf("_cyc_tuple_%s", (string_t)digest);
+}
+
 // used to generate struct definitions for tuple types
 // we share the struct definitions where possible (need to for C compiler!)
 static type_t add_tuple_type_body(region_t<`d> d, $(struct TocState<`d> @`d,
@@ -458,7 +481,6 @@ static type_t add_tuple_type_body(region_t<`d> d, $(struct TocState<`d> @`d,
   }
   // haven't seen this one before, add a declaration
   // need to set up a real struct declaration for get_varsizeexp and RemoveAggrs
-  stringptr_t xname = new (string_t) aprintf("_tuple%d", ctxt->tuple_type_counter++);
   let fs            = NULL;
   let ts            = NULL;
   for (int i = 1; tqs0 != NULL; tqs0 = tqs0->tl, i++) {
@@ -468,7 +490,7 @@ static type_t add_tuple_type_body(region_t<`d> d, $(struct TocState<`d> @`d,
   }
   fs           = imp_rev(fs);
   ts           = imp_rev(ts);
-  let sd       = make_c_struct_defn(xname, fs);
+  let sd       = make_c_struct_defn(anonymous_type_name(StructA, fs), fs);
   let ans      = aggr_type(KnownAggr(new sd), NULL);
   ctxt->result_decls = new List(new_decl(new Aggr_d(sd), DL), ctxt->result_decls);
   *tuple_types = rnew(d) List(rnew(d) $(ans, ts), *tuple_types);
@@ -492,7 +514,7 @@ static type_t add_anon_aggr_type_body(region_t<`d> d,
   }
   // haven't seen this one before, add a declaration
   // need to set up a real struct declaration for get_varsizeexp and RemoveAggrs
-  stringptr_t xname = new (string_t) aprintf("_tuple%d", ctxt->tuple_type_counter++);
+  stringptr_t xname = anonymous_type_name(ak, fs);
   let sd            = make_c_struct_defn(xname, fs);
   sd->kind          = ak;  // might be a union
   let ans           = aggr_type(KnownAggr(new sd), NULL);
@@ -1122,10 +1144,13 @@ static stmt_t letdecl_to_c(env_t, pat_t, Tcpat::decision_opt_t, type_t, exp_t, s
 static void local_decl_to_c(env_t, vardecl_t, stmt_t);
 static void fndecl_to_c(env_t, fndecl_t, bool cinclude);
 
+static string_t callback_signature(toc_context_t, type_t);
+static exp_opt_t callback_runtime_conversion(toc_context_t, type_t, exp_t);
+
 // A cast does not adapt a C function's ABI. For a statically named callback,
 // emit a real function with the requested signature and convert at its call
-// boundary. Unknown function values require a representation carrying their
-// original callable and are deliberately left to the existing path for now.
+// boundary. Static initializers need constant function addresses; constructors
+// register their original identity with the runtime ABI bridge.
 static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value) {
   while (true) {
     switch (value->r) {
@@ -1172,7 +1197,10 @@ static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value
         let ty = (*w->hd)[2];
         let vd = new_vardecl(DL, q, ty, NULL, NULL);
         let arg = set_type(varb_exp(new Param_b(vd), DL), ty);
-        if (Tcutil::typecmp(ty, (*a->hd)[2]) != 0) arg = cast_it((*a->hd)[2], arg);
+        if (Tcutil::typecmp(ty, (*a->hd)[2]) != 0) {
+          let adapted = callback_runtime_conversion(ctxt, (*a->hd)[2], arg);
+          arg = adapted == NULL ? cast_it((*a->hd)[2], arg) : (exp_t)adapted;
+        }
         params = new List(new $((var_opt_t)(*q)[1], (*w->hd)[1], ty), params);
         variables = new List(vd, variables);
         optional_variables = new List((vardecl_opt_t)vd, optional_variables);
@@ -1184,8 +1212,10 @@ static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value
       let call = set_type(fncall_exp(deep_copy(value), imp_rev(args), DL), actual.ret_type);
       stmt_t body;
       if (is_void_type(wanted.ret_type)) body = exp_stmt(call, DL);
-      else body = return_stmt(Tcutil::typecmp(actual.ret_type, wanted.ret_type) == 0
-                              ? call : cast_it(wanted.ret_type, call), DL);
+      else {
+        let adapted = callback_runtime_conversion(ctxt, wanted.ret_type, call);
+        body = return_stmt(adapted == NULL ? cast_it(wanted.ret_type, call) : (exp_t)adapted, DL);
+      }
       let name = new $(Nmspace{.C_n = NULL},
                        new (string_t) aprintf("_cyc_callback%X", ctxt->temp_var_counter++));
       wanted.args = imp_rev(params);
@@ -1201,8 +1231,142 @@ static exp_opt_t callback_adapter(toc_context_t ctxt, type_t target, exp_t value
       ctxt->result_decls = new List(new_decl(new Fn_d(fd), DL), ctxt->result_decls);
       let result = set_type(varb_exp(new Funname_b(fd), DL), target);
       ctxt->callback_adapters = new List(new $(source_name, to, result), ctxt->callback_adapters);
+      let original_sig = callback_signature(ctxt, from);
+      let adapter_sig = callback_signature(ctxt, to);
+      if (strlen(original_sig) == 0 || strlen(adapter_sig) == 0) {
+        Warn::err2(value->loc, "unsupported native static callback ABI: ", from, " to ", to);
+        return NULL;
+      }
+      let init_info = wanted;
+      init_info.ret_type = void_type;
+      init_info.args = NULL;
+      init_info.arg_vardecls = NULL;
+      init_info.attributes = new List(&Atts::Constructor_att_val, NULL);
+      let init_name = new $(Nmspace{.C_n = NULL},
+                           new (string_t) aprintf("_cyc_callback_init%X", ctxt->temp_var_counter++));
+      let p = void_star_type(ctxt);
+      let register_call = set_type(fncall_exp_dl(_cyc_callback_register_static_e,
+            cast_it(p, deep_copy(result)), cast_it(p, deep_copy(value)),
+            string_exp(original_sig, DL), string_exp(adapter_sig, DL)), void_type);
+      let init_fd = new Fndecl{.sc = Static, .is_inline = false, .name = init_name,
+          .body = exp_stmt(register_call, DL), .i = init_info, .cached_type = new FnType(init_info),
+          .param_vardecls = new Core::Opt(NULL), .fn_vardecl = NULL, .orig_scope = Static,
+          .escapes = true};
+      ctxt->result_decls = new List(new_decl(new Fn_d(init_fd), DL), ctxt->result_decls);
       return result;
     default: return NULL;
+  }
+}
+
+// Runtime descriptors preserve both ABI layout and nominal pointer types.
+// The latter matter even when two C function prototypes use pointer registers.
+static string_t callback_signature(toc_context_t ctxt, type_t t) {
+  t = compress(t);
+  switch (t) {
+    case &AppType(&VoidCon, _): return "v";
+    case &AppType(&IntCon(sign, sz), _):
+      switch (sz) {
+        case Char_sz: return sign == Unsigned ? "B" : "b";
+        case Short_sz: return sign == Unsigned ? "H" : "h";
+        case Int_sz: return sign == Unsigned ? "I" : "i";
+        case Long_sz: return sign == Unsigned ? "L" : "l";
+        case LongLong_sz: return sign == Unsigned ? "Q" : "q";
+        default: return "";
+      }
+    case &AppType(&FloatCon(n), _): return n == 0 ? "f" : n == 1 ? "d" : "e";
+    case &PointerType(p):
+      if (is_function_type(p.elt_type)) return callback_signature(ctxt, p.elt_type);
+      let label = Absynpp::typ2string(t);
+      return aprintf("p%u:%s", strlen(label), label);
+    case &FnType(fi):
+      if (fi.c_varargs || fi.cyc_varargs != NULL) return "";
+      let ret = callback_signature(ctxt, fi.ret_type);
+      if (strlen(ret) == 0) return "";
+      let text = aprintf("F%s(", ret);
+      for (let args = fi.args; args != NULL; args = args->tl) {
+        let arg = callback_signature(ctxt, (*args->hd)[2]);
+        if (strlen(arg) == 0) return "";
+        text = aprintf("%s%s", text, arg);
+      }
+      return aprintf("%s)", text);
+    case &TypedefType(_, _, _, underlying):
+      return underlying == NULL ? "" : callback_signature(ctxt, (type_t)underlying);
+    case &AppType(&EnumCon(...), _):
+    case &AppType(&AnonEnumCon(...), _):
+      let label = Absynpp::typ2string(t);
+      return aprintf("E%u:%s", strlen(label), label);
+    case &AppType(&AggrCon(info), _):
+      if (Tcutil::typecmp(t, fat_ptr_type(ctxt)) == 0)
+        return "S8:_fat_ptr(p1:vp1:vp1:v)";
+      aggrdecl_t ad;
+      switch (info) {
+        case {.KnownAggr = &known}: ad = known; break;
+        default: return "";
+      }
+      if (ad->kind != StructA || ad->impl == NULL) return "";
+      let label = Absynpp::typ2string(t);
+      let text = aprintf("S%u:%s(", strlen(label), label);
+      for (let fields = ad->impl->fields; fields != NULL; fields = fields->tl) {
+        if (fields->hd->width != NULL) return "";
+        let field = callback_signature(ctxt, fields->hd->type);
+        if (strlen(field) == 0) return "";
+        text = aprintf("%s%s", text, field);
+      }
+      return aprintf("%s)", text);
+    default: return "";
+  }
+}
+
+static exp_opt_t callback_runtime_conversion(toc_context_t ctxt, type_t target, exp_t value) {
+  if (value->topt == NULL) return NULL;
+  type_t from = compress((type_t)value->topt);
+  type_t to = compress(target);
+  if (is_pointer_type(from)) from = compress(pointer_elt_type(from));
+  if (is_pointer_type(to)) to = compress(pointer_elt_type(to));
+  if (!is_function_type(from) || !is_function_type(to)) return NULL;
+  if (Tcutil::typecmp(from, to) == 0) return value;
+  let actual = callback_signature(ctxt, from);
+  let wanted = callback_signature(ctxt, to);
+  if (strlen(actual) == 0 || strlen(wanted) == 0) {
+    Warn::err2(value->loc, "unsupported native callback ABI conversion: ", from, " to ", to);
+    return NULL;
+  }
+  let p = void_star_type(ctxt);
+  let call = set_type(fncall_exp_dl(_cyc_callback_adapt_e, cast_it(p, value),
+                                   string_exp(actual, DL), string_exp(wanted, DL)), p);
+  return cast_it(target, call);
+}
+
+static exp_opt_t callback_conversion(env_t nv, type_t target, exp_t value) {
+  if (in_lhs(nv)) return value;
+  if (is_toplevel(nv)) return callback_adapter(nv->ctxt, target, value);
+  return callback_runtime_conversion(nv->ctxt, target, value);
+}
+
+static type_t callback_field_type(toc_context_t ctxt, type_t aggregate, field_name_t name) {
+  switch (compress(aggregate)) {
+    case &SubsetType(vd, ...): return callback_field_type(ctxt, vd->type, name);
+    case &AppType(&AggrCon(info), _):
+      let ad = get_known_aggrdecl(info);
+      if (ad->impl == NULL) return void_type;
+      let field = lookup_field(ad->impl->fields, name);
+      if (field == NULL) return void_type;
+      let t = typ_to_c(ctxt, field->type);
+      let ft = compress(t);
+      if (is_pointer_type(ft)) ft = compress(pointer_elt_type(ft));
+      return is_function_type(ft) ? t : void_type;
+    default: return void_type;
+  }
+}
+
+static void callback_field_read(env_t nv, exp_t e, type_t aggregate, field_name_t name,
+                                type_t requested) {
+  let stored = callback_field_type(nv->ctxt, aggregate, name);
+  if (is_void_type(stored)) return;
+  e->topt = stored;
+  if (!in_lhs(nv)) {
+    let adapter = callback_conversion(nv, requested, deep_copy(e));
+    if (adapter != NULL) { *e = *adapter; e->topt = requested; }
   }
 }
 
@@ -1984,6 +2148,14 @@ void exp_to_c(env_t nv, exp_t e) {
           exp_t e2        = es->tl->hd;
           type_t t1       = old_types->hd;
           type_t t2       = old_types->tl->hd;
+          if ((p == Eq || p == Neq) && is_pointer_type(t1) &&
+              is_function_type(pointer_elt_type(t1))) {
+            let vp = void_star_type(nv->ctxt);
+            let equal = set_type(fncall_exp_dl(_cyc_callback_equal_e,
+                        cast_it(vp, e1), cast_it(vp, e2)), sint_type);
+            e->r = p == Eq ? equal->r : eq_exp(equal, set_type(int_exp(Signed, 0, DL), sint_type), DL)->r;
+            break;
+          }
           type_t elt_type = void_type;  // set in next call
           if (is_fat_pointer_type_elt(t1, &elt_type)) {
             let t    = cstar_type(typ_to_c(nv->ctxt, elt_type), mt_tq);
@@ -2148,6 +2320,10 @@ void exp_to_c(env_t nv, exp_t e) {
       exp_to_c(nv, e1);
       set_lhs(nv, false);
       exp_to_c(nv, e2);
+      if (popt == NULL) {
+        let adapter = callback_conversion(nv, (type_t)e1->topt, deep_copy(e2));
+        if (adapter != NULL) *e2 = *adapter;
+      }
       // special case for pointer arithmetic of t ? or zero-terminated types
       bool done = false;
       if (popt != NULL) {
@@ -2201,6 +2377,12 @@ void exp_to_c(env_t nv, exp_t e) {
           *e = *e1;
         }
       }
+      if (popt == NULL) {
+        let assigned = deep_copy(e);
+        assigned->topt = e1->topt;
+        let adapter = callback_conversion(nv, new_typ, assigned);
+        if (adapter != NULL) { e->r = adapter->r; e->topt = new_typ; }
+      }
       break;
     case &Conditional_e(e1, e2, e3):
       exp_to_c(nv, e1);
@@ -2238,7 +2420,7 @@ void exp_to_c(env_t nv, exp_t e) {
               if (formals != NULL) {
                 let expected = (*formals->hd)[2];
                 if (Tcutil::typecmp(expected, (type_t)arg->topt) != 0) {
-                  let adapter = callback_adapter(nv->ctxt, expected, arg);
+                  let adapter = callback_conversion(nv, expected, arg);
                   actuals->hd = adapter == NULL ? cast_it(expected, arg) : (exp_t)adapter;
                 }
                 formals = formals->tl;
@@ -2248,7 +2430,9 @@ void exp_to_c(env_t nv, exp_t e) {
             if (do_null_check(e))
               callee->r = fncall_exp_dl(_check_null_e, deep_copy(callee))->r;
             let call = set_type(fncall_exp(callee, es, DL), fi.ret_type);
-            e->r = Tcutil::typecmp(fi.ret_type, new_typ) == 0 ? call->r : cast_it_r(new_typ, call);
+            let adapter = callback_conversion(nv, new_typ, call);
+            e->r = adapter != NULL ? adapter->r :
+                Tcutil::typecmp(fi.ret_type, new_typ) == 0 ? call->r : cast_it_r(new_typ, call);
             break;
           default: toc_impos("instantiated call has no function type");
         }
@@ -2401,8 +2585,8 @@ void exp_to_c(env_t nv, exp_t e) {
       let tc  = typ_to_c(nv->ctxt, (type_t)old_typ);
       let tc1 = typ_to_c(nv->ctxt, (type_t)e1->topt);
       if (Tcutil::typecmp(tc, tc1) != 0) {
-        let adapter = callback_adapter(nv->ctxt, tc, e1);
-        if (adapter != NULL) { e->r = adapter->r; break; }
+        let adapter = callback_conversion(nv, tc, e1);
+        if (adapter != NULL) { e->r = adapter->r; if (in_lhs(nv)) e->topt = adapter->topt; break; }
         // // HACK ALERT:
         // // gcc 3.4 refuses to compile a function call ( (t)f )(...)
         // // for types t that we need, so use ({(t)f})(...) instead.
@@ -2425,9 +2609,10 @@ void exp_to_c(env_t nv, exp_t e) {
       *t               = new_typ_c;
       exp_to_c(nv, e1);
       if (Tcutil::typecmp(old_t2_c, new_typ_c) != 0) {
-        let adapter = callback_adapter(nv->ctxt, new_typ_c, e1);
+        let adapter = callback_conversion(nv, new_typ_c, e1);
         if (adapter != NULL) {
-          e->r = adapter->r;
+          e->r = !in_lhs(nv) && do_null_check(e) ? fncall_exp_dl(_check_null_e, (exp_t)adapter)->r : adapter->r;
+          if (in_lhs(nv)) e->topt = adapter->topt;
           did_inserted_checks = true;
           break;
         }
@@ -2724,6 +2909,7 @@ void exp_to_c(env_t nv, exp_t e) {
         e->r     = cast_it_r(t, e2);
         e->topt  = t;
       }
+      if (!is_poly) callback_field_read(nv, e, e1_cyc_type, f, t);
       break;
     case &AggrArrow_e(e1, f, is_tagged, is_read):
       bool is_poly = is_poly_project(e);  // decide before mutating e
@@ -2753,6 +2939,7 @@ void exp_to_c(env_t nv, exp_t e) {
       } else if (is_poly) {
         e->topt = void_star_type(nv->ctxt);
       }
+      if (!is_poly) callback_field_read(nv, e, ta, f, t);
       break;
     case &Deref_e(e1):
       did_inserted_checks = true;
@@ -2879,6 +3066,8 @@ void exp_to_c(env_t nv, exp_t e) {
               let &$(aggrfield, fieldexp) = fields2->hd;
               let old_field_typ           = fieldexp->topt;  // for kludge below
               exp_to_c(nv, fieldexp);
+              let adapter = callback_conversion(nv, typ_to_c(nv->ctxt, aggrfield->type), deep_copy(fieldexp));
+              if (adapter != NULL) *fieldexp = *adapter;
               // warning avoidance
               if (is_void_star_or_boxed_tvar(aggrfield->type) &&
                   !is_pointer_or_boxed_tvar((type_t)fieldexp->topt)) {
@@ -2993,6 +3182,8 @@ void exp_to_c(env_t nv, exp_t e) {
                 let fieldtyp            = typ_to_c(nv->ctxt, field->type);
                 let fieldexp_typ        = typ_to_c(nv->ctxt, (type_t)fieldexp->topt);
                 exp_to_c(nv, fieldexp);
+                let adapter = callback_conversion(nv, fieldtyp, deep_copy(fieldexp));
+                if (adapter != NULL) *fieldexp = *adapter;
                 // must cast when the types don't match up -- except when
                 // the last type is of abstract kind, for then we should've
                 // generated a specialized struct...
@@ -3017,6 +3208,8 @@ void exp_to_c(env_t nv, exp_t e) {
         let cur_e_typ    = (type_t)cur_e->topt;
         type_t field_typ = typ_to_c(nv->ctxt, (*tqts->hd)[1]);
         exp_to_c(nv, cur_e);
+        let adapter = callback_conversion(nv, field_typ, deep_copy(cur_e));
+        if (adapter != NULL) *cur_e = *adapter;
         if (is_void_star_or_boxed_tvar(field_typ) && !is_pointer_or_boxed_tvar(cur_e_typ))
           cur_e->r = cast_it(field_typ, deep_copy(cur_e))->r;
       }
@@ -5008,6 +5201,9 @@ toc_context_t Toc_Ctx_create() {
   _fat_ptr_plus_pr.f0.C_n                     = NULL;
   _fat_ptr_minus_pr.f0.C_n = NULL;
   _fat_ptr_diff_pr.f0.C_n = NULL;
+  _cyc_callback_adapt_pr.f0.C_n = NULL;
+  _cyc_callback_equal_pr.f0.C_n = NULL;
+  _cyc_callback_register_static_pr.f0.C_n = NULL;
   _zero_arr_plus_char_pr.f0.C_n               = NULL;
   _zero_arr_plus_other_pr.f0.C_n              = NULL;
   _fat_ptr_inplace_plus_pr.f0.C_n             = NULL;
@@ -5036,7 +5232,7 @@ toc_context_t Toc_Ctx_create() {
   _rethrow_pr.f0.C_n                          = NULL;
   _throw_assert_pr.f0.C_n                     = NULL;
 
-  ctxt->globals = new {&_throw_str,
+  ctxt->globals = new {&_cyc_callback_equal_str, &_cyc_callback_register_static_str, &_cyc_callback_adapt_str, &_throw_str,
                  &setjmp_str,
                  &_push_handler_str,
                  &_pop_handler_str,

@@ -8,6 +8,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Native callable adapters keep their metadata and executable closure alive. */
+void *_cyc_callback_adapt(void *, const char *, const char *);
+int _cyc_callback_equal(void *, void *);
+void _cyc_callback_register_static(void *, void *, const char *, const char *);
+
 /* Need one of these per thread (see runtime_stack.c). The runtime maintains
    a stack that contains either _handler_cons structs or _RegionHandle structs.
    The tag is 0 for a handler_cons and 1 for a region handle.  */

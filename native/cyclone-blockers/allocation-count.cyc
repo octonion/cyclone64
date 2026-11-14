@@ -1,0 +1,12 @@
+#include "cyclone/library/std/core.h"
+using Core;
+extern "C" unsigned long abi_large_index(void);
+int main(int argc, string_t ?argv) {
+  unsigned long count=abi_large_index()+15UL;
+  try { char ?p=malloc(count); return 1; } catch { default: break; }
+  try { int ?p=calloc(count,sizeof(int)); return 2; } catch { default: break; }
+  region r;
+  try { char ?p=rmalloc(r,count); return 3; } catch { default: break; }
+  try { int ?p=rcalloc(r,count,sizeof(int)); return 4; } catch { default: break; }
+  return 0;
+}

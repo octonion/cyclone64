@@ -145,8 +145,11 @@ See [native/tests](native/tests) for client and checkpoint examples.
 Please include a minimal reproducer, the commit, OS, compiler versions and build
 overrides when reporting a problem. Changes should pass `make check`; installation
 changes should also pass `native/check-install.py`. CI uses portable x86-64 flags
-and preserves logs as workflow artifacts. Older Bazel files remain for historical
-reference; GNU Make is the supported native build entry point.
+and preserves logs as workflow artifacts. GNU Make is the supported native build
+entry point. Obsolete Bazel definitions and experimental reference wrappers have
+been removed; their history remains in Git. The checked-in `stage0/` C sources
+are still required for bootstrapping. See [native/CLEANUP.txt](native/CLEANUP.txt)
+for the retained source and regression coverage.
 
 ## License and attribution
 

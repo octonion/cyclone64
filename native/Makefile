@@ -113,8 +113,3 @@ $(BUILD)/check-callback-ffi: native/compiler-checks/callback-ffi.c library/runti
 $(BUILD)/check-type-name: native/compiler-checks/type-name.c library/compiler/inference/type_name.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) $^ $(LDFLAGS) $(shell pkg-config --cflags --libs libcrypto) -o $@
-
-# A representation prototype only; not yet emitted by the compiler.
-$(BUILD)/check-polyref: native/compiler-checks/polyref.c native/experimental/polyref.c native/experimental/polyref.h library/std/cyc-lib/cyc_include.h
-	@mkdir -p $(dir $@)
-	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) -Ilibrary/std/cyc-lib $(filter %.c,$^) $(LDFLAGS) -o $@

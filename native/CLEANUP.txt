@@ -1,0 +1,41 @@
+Source tree maintenance
+
+GNU Make is the maintained build interface: make all, make check, make install.
+The removed Bazel files (including the stage1 directory), old root build.sh and
+update-boot scripts are recoverable from Git at c6be2eb. The old region test
+Makefiles and dotest script referenced obsolete allocator files; their eight
+actual C test drivers and descriptions remain, exercised by make check and
+make -f native/Makefile check rlib-check.
+
+The unused native/experimental/polyref implementation, prototype-only C test,
+and check-polyref target have been removed. The native compiler uses reified
+layouts instead, documented in NATIVE-LAYOUTS.txt. Regression tests for references,
+escaping aliases, arrays, aggregate layouts, callbacks and bounds remain in
+native/layout-tests, native/cyclone-tests, native/compiler-checks, and the original
+native/cyclone-blockers reproducer collection. Reference-test symlinks and the
+32-bit reference build scripts remain. No existing regression driver was removed
+except the test that exercised only the discarded prototype implementation.
+
+Keep stage0: its generated C compiler and tools bootstrap a fresh native build
+without requiring an existing Cyclone executable. The stage1 directory removed
+above held only obsolete Bazel definitions; generated native stages instead live
+inside the selected BUILD directory.
+
+Optional upstream libraries and utilities (including XML, PCRE bindings and
+other tools) remain as source. They have not been classified as dead code merely
+because the core Make bootstrap does not build them. Their removal would require
+a separate dependency and feature audit.
+
+Generated builds are not tracked. Use a separate BUILD for compiler/flag changes.
+make clean removes only its selected managed BUILD directory. Workstation cleanup
+retains current publication builds and sanitizer candidates, archives old text
+logs/results and exploratory sources, and removes superseded generated outputs.
+Historical paths in STATUS.txt describe earlier validation, not clone prerequisites.
+
+Validation: a source archive containing only the cleaned tracked tree, with no
+.git directory or pre-existing outputs, passed make all and make check under
+GCC 15 with the default native architecture. All 81 generated C files converged.
+Staged installation, relocation to a prefix containing spaces, all 30 installed
+executable probes, driver modes, pkg-config clients, and the short/long/escaped
+filename regressions passed. Hash checks confirmed preservation of the stage0
+sources, retained test sources/symlinks and existing validated build artifacts.

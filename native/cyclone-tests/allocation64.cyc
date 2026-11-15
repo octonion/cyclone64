@@ -2,7 +2,7 @@
 using Core;
 extern "C" unsigned long abi_large_index(void);
 int main(int argc, string_t ?argv) {
-  unsigned long count=abi_large_index()+15UL;
+  unsigned long count=0x8000000000000000UL;
   try { char ?p=malloc(count); return 1; } catch { case &Bad_alloc: break; default: return 99; }
   try { int ?p=calloc(count,sizeof(int)); return 2; } catch { case &Bad_alloc: break; default: return 99; }
   region r;

@@ -1,0 +1,23 @@
+Historical application coverage
+===============================
+
+make check compiles and runs all 31 top-level testsuite/tests/*.cyc programs.
+Subdirectory demos and interactive applications are outside this manifest.
+Compilation uses generated native libc bindings and the same compiler/runtime
+as the bootstrap. Generated pointer-to-int warnings are errors. Each phase has
+a command record and log under BUILD/src/native/compiler-tests/applications.
+
+structarray is the only expected failure: translation must exit 1 and contain
+  Internal Compiler Error: bad exp after translation to C: valueof(`j)
+This is the existential array-member lowering limitation. The runner rejects
+other failures and unexpected success; remove the exception when it is fixed.
+
+sigaction_test intentionally raises SIGTERM after checking SIGUSR1/SIGUSR2 and
+ignored SIGTERM. A timeout is a failure, not an accepted substitute. Its output
+must contain all three checkpoints and must not reach its final error print.
+The test harness disables crash reporting in test executables and flushes stdout.
+
+refcnt tests use the repository's existing cyctest.h via the normal include
+mapping. testexn initializes pthread_t with its actual native typedef and tests
+100 concurrent exception-handling threads through the collector-aware C bridge.
+The rc example compares pointer-width integers for cross-type pointer identity.

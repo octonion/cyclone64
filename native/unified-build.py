@@ -144,10 +144,11 @@ else:
     print('Build is up to date:', BUILD, flush=True)
 
 if ACTION == 'check':
+    run([sys.executable,'native/check-driver.py'],'check-driver')
     run(['make','-f','native/Makefile','-j'+str(jobs),'check','rlib-check',
          'native/build/check-runtime-bounds','native/build/check-gc-allocation',
-         'native/build/check-callback-ffi','native/build/check-type-name'],'check-banshee-build-runtime')
-    for name in ('runtime-bounds','gc-allocation','callback-ffi','type-name'):
+         'native/build/check-callback-ffi','native/build/check-type-name','native/build/check-allocation-width'],'check-banshee-build-runtime')
+    for name in ('runtime-bounds','gc-allocation','callback-ffi','type-name','allocation-width'):
         run(['native/build/check-'+name],'check-'+name)
     if config['NATIVE_GC']=='system':
         run(['make','-f','native/Makefile','native/build/check-gc-collection'],'build-gc-collection')
@@ -158,6 +159,7 @@ if ACTION == 'check':
     run([sys.executable,'native/run-cyclone-tests.py',*options,'--skip-diagnostics','--skip-rejections',
          '--probe-dir','native/layout-tests','--output','native/compiler-tests/layout'],'check-layout')
     run([sys.executable,'native/run-cyctest.py','--direct',*options,'--out','native/compiler-tests/upstream'],'check-upstream')
+    run([sys.executable,'native/run-applications.py',*options,'--out','native/compiler-tests/applications'], 'check-applications')
     for name in ('pratt-constants','pointer-compare'):
         run([sys.executable,'native/run-'+name+'.py','--stage-dir','native/bootstrap/stage2',
              '--out','native/compiler-tests/'+name],'check-'+name)

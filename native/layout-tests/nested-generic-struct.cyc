@@ -1,0 +1,15 @@
+struct Pair<`a,`b> { `a x; `b y; };
+struct Node<`a> { `a value; struct Node<`a> *next; };
+int main() {
+  let p = new Pair{(int)-5, 0x123456789L};
+  let pp = new Pair{p, 'z'};
+  let ppp = new Pair{pp, 11};
+  if (ppp->x->x->x != -5 || ppp->x->x->y != 0x123456789L || ppp->x->y != 'z') return 1;
+  let q = new Pair{(int)7, 0x234567891L};
+  pp->x = q;
+  if (pp->x->x != 7 || pp->x->y != 0x234567891L) return 2;
+  struct Node<long> *n = new Node{0x123456789L, NULL};
+  n = new Node{0x234567891L, n};
+  if (n->next == NULL || n->next->value != 0x123456789L) return 3;
+  return 0;
+}

@@ -54,11 +54,11 @@ typedef long long int64_t;
     return (void *)(__orig_x + orig_i);                                      \
   } while (0)
 
-char *_zero_arr_plus_char_fn(const char *orig_x, unsigned int orig_sz, ptrdiff_t orig_i, const char *filename,
+char *_zero_arr_plus_char_fn(const char *orig_x, size_t orig_sz, ptrdiff_t orig_i, const char *filename,
                              unsigned lineno) {
   DO_PLUS_FN(char);
 }
-void *_zero_arr_plus_other_fn(unsigned t, const void *orig_x, unsigned orig_sz, ptrdiff_t orig_i,
+void *_zero_arr_plus_other_fn(size_t t, const void *orig_x, size_t orig_sz, ptrdiff_t orig_i,
                               const char *filename, unsigned lineno) {
   switch (t) {
     case 1:
@@ -83,7 +83,7 @@ void *_zero_arr_plus_other_fn(unsigned t, const void *orig_x, unsigned orig_sz, 
 #define DO_GET_SIZE(t)                    \
   do {                                    \
     const t *_gres_x = (const t *)orig_x; \
-    unsigned _gres = 0;                   \
+    size_t _gres = 0;                   \
     if (_gres_x != 0) {                   \
       _gres = orig_offset;                \
       _gres_x += orig_offset - 1;         \
@@ -95,8 +95,8 @@ void *_zero_arr_plus_other_fn(unsigned t, const void *orig_x, unsigned orig_sz, 
     return _gres;                         \
   } while (0)
 
-unsigned _get_zero_arr_size_char(const char *orig_x, unsigned orig_offset) { DO_GET_SIZE(char); }
-unsigned _get_zero_arr_size_other(unsigned t, const void *orig_x, unsigned orig_offset) {
+size_t _get_zero_arr_size_char(const char *orig_x, size_t orig_offset) { DO_GET_SIZE(char); }
+size_t _get_zero_arr_size_other(size_t t, const void *orig_x, size_t orig_offset) {
   switch (t) {
     case 1:
       DO_GET_SIZE(int8_t);
@@ -120,7 +120,7 @@ char *_zero_arr_inplace_plus_char_fn(char **x, ptrdiff_t orig_i, const char *fil
   *x = _zero_arr_plus_char_fn(*x, 1, orig_i, filename, lineno);
   return *x;
 }
-void *_zero_arr_inplace_plus_other_fn(unsigned t, void **x, ptrdiff_t orig_i, const char *filename,
+void *_zero_arr_inplace_plus_other_fn(size_t t, void **x, ptrdiff_t orig_i, const char *filename,
                                       unsigned lineno) {
   *x = _zero_arr_plus_other_fn(t, *x, 1, orig_i, filename, lineno);
   return *x;
@@ -133,7 +133,7 @@ char *_zero_arr_inplace_plus_post_char_fn(char **x, ptrdiff_t orig_i, const char
   *x = _zero_arr_plus_char_fn(_zap_res, 1, orig_i, filename, lineno);
   return _zap_res;
 }
-void *_zero_arr_inplace_plus_post_other_fn(unsigned t, void **x, ptrdiff_t orig_i,
+void *_zero_arr_inplace_plus_post_other_fn(size_t t, void **x, ptrdiff_t orig_i,
                                               const char *filename, unsigned lineno) {
   void *_zap_res = *x;
   *x = _zero_arr_plus_other_fn(t, _zap_res, 1, orig_i, filename, lineno);

@@ -1,0 +1,16 @@
+#include "cyclone/library/std/core.h"
+using Core;
+static $(int,long) first(`a @x) { return $(-17,0x123456789L); }
+static $(int,long) second(`a @x) { return $(23,0x234567891L); }
+static $(int,long) (@global)(int @) = first;
+static int x=1;
+int main(int argc, string_t ?argv) {
+  $(int,long) (@f)(int @) = argc == 1 ? first : second;
+  let $(a,b) = f(&x);
+  if(a != -17 || b != 0x123456789L) return 1;
+  let $(c,d) = global(&x);
+  if(c != -17 || d != 0x123456789L) return 2;
+  f = second;
+  let $(e,g) = f(&x);
+  return e != 23 || g != 0x234567891L;
+}

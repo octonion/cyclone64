@@ -69,7 +69,7 @@ jobs:
             build/installed-checks/
 
   banshee-sanitizers:
-    name: Banshee / ASan + UBSan
+    name: Banshee and runtime / ASan + UBSan
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     env:
@@ -85,17 +85,30 @@ jobs:
       - name: Install compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang-21
+          sudo apt-get install -y build-essential clang-21 pkg-config libffi-dev
       - name: Run independent solver and region tests
         shell: bash
         run: |
           mkdir -p build
           set -o pipefail
           make -f native/Makefile BUILD=build/banshee-asan -j4 check rlib-check 2>&1 | tee build/banshee-sanitizers.log
+      - name: Run allocation, bounds and callback sanitizers
+        shell: bash
+        run: |
+          set -o pipefail
+          make -f native/Makefile BUILD=build/runtime-asan -j4 \
+            build/runtime-asan/check-gc-allocation build/runtime-asan/check-allocation-width \
+            build/runtime-asan/check-runtime-bounds build/runtime-asan/check-callback-ffi \
+            2>&1 | tee build/runtime-sanitizers.log
+          for test in gc-allocation allocation-width runtime-bounds callback-ffi; do
+            "build/runtime-asan/check-$test" 2>&1 | tee -a build/runtime-sanitizers.log
+          done
       - name: Preserve sanitizer log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: banshee-sanitizer-log
           retention-days: 14
-          path: build/banshee-sanitizers.log
+          path: |
+            build/banshee-sanitizers.log
+            build/runtime-sanitizers.log

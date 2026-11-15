@@ -40,8 +40,8 @@ struct _fat_ptr {
 /* Regions */
 struct _RegionPage {
 #ifdef CYC_REGION_PROFILE
-  unsigned total_bytes;
-  unsigned free_bytes;
+  size_t total_bytes;
+  size_t free_bytes;
 #endif
   struct _RegionPage *next;
   __attribute__((aligned)) char data[1];
@@ -60,8 +60,8 @@ struct _RegionHandle {
   struct _pool *released_ptrs;
   struct bget_region_key *key;
   const char *name;
-  unsigned used_bytes;
-  unsigned wasted_bytes;
+  size_t used_bytes;
+  size_t wasted_bytes;
 };
 
 // A dynamic region is just a region handle.  The wrapper struct is for type
@@ -185,22 +185,22 @@ extern char Cyc_Assert[];
 
 /* _zero_arr_plus_*_fn(x,sz,i,filename,lineno) adds i to zero-terminated ptr
    x that has at least sz elements */
-char *_zero_arr_plus_char_fn(const char *, unsigned, ptrdiff_t, const char *, unsigned);
-void *_zero_arr_plus_other_fn(unsigned, const void *, unsigned, ptrdiff_t, const char *, unsigned);
+char *_zero_arr_plus_char_fn(const char *, size_t, ptrdiff_t, const char *, unsigned);
+void *_zero_arr_plus_other_fn(size_t, const void *, size_t, ptrdiff_t, const char *, unsigned);
 #endif
 
 /* _get_zero_arr_size_*(x,sz) returns the number of elements in a
    zero-terminated array that is NULL or has at least sz elements */
-unsigned _get_zero_arr_size_char(const char *orig_x, unsigned orig_offset);
-unsigned _get_zero_arr_size_other(unsigned t, const void *orig_x, unsigned orig_offset);
+size_t _get_zero_arr_size_char(const char *orig_x, size_t orig_offset);
+size_t _get_zero_arr_size_other(size_t t, const void *orig_x, size_t orig_offset);
 
 /* _zero_arr_inplace_plus_*_fn(x,i,filename,lineno) sets
    zero-terminated pointer *x to *x + i */
 char *_zero_arr_inplace_plus_char_fn(char **, ptrdiff_t, const char *file, unsigned line);
 char *_zero_arr_inplace_plus_post_char_fn(char **, ptrdiff_t, const char *file, unsigned line);
 // note: must cast result in toc.cyc
-void *_zero_arr_inplace_plus_other_fn(unsigned, void **, ptrdiff_t, const char *file, unsigned line);
-void *_zero_arr_inplace_plus_post_other_fn(unsigned, void **, ptrdiff_t, const char *file, unsigned line);
+void *_zero_arr_inplace_plus_other_fn(size_t, void **, ptrdiff_t, const char *file, unsigned line);
+void *_zero_arr_inplace_plus_post_other_fn(size_t, void **, ptrdiff_t, const char *file, unsigned line);
 /* Check in the original integer type before conversion to the scan offset. */
 #ifdef NO_CYC_BOUNDS_CHECKS
 #define _zero_arr_index(i) (i)
@@ -347,7 +347,8 @@ void *cyc_vmalloc(size_t);
 void cyc_vfree(void *);
 #endif
 // bound the allocation size to be < MAX_ALLOC_SIZE. See macros below for usage.
-#define MAX_MALLOC_SIZE (1u << 28)
+#define MAX_MALLOC_SIZE ((size_t)PTRDIFF_MAX - 1)
+/* Object extents must remain representable by pointer differences. */
 void *_bounded_GC_malloc(size_t, const char *, int);
 void *_bounded_GC_malloc_atomic(size_t, const char *, int);
 void *_bounded_GC_calloc(size_t, size_t, const char *, int);
@@ -363,34 +364,35 @@ void *_bounded_GC_calloc_atomic(size_t, size_t, const char *, int);
 /* Validate before a C size_t parameter can narrow a wide source expression. */
 #define _check_alloc_size(x) \
   ({ __auto_type _ca_x = (x); \
-     if (_ca_x < 0 || _ca_x > SIZE_MAX) _throw_badalloc(); \
+     if ((unsigned __int128)_ca_x > SIZE_MAX) _throw_badalloc(); \
      (size_t)_ca_x; })
 
 /* Bounds for initialized arrays include a possible terminator. Check the
  * addition before evaluating it in the source integer type. */
 #define _check_alloc_plus(x, y) \
   ({ __auto_type _cap_x = (x); __auto_type _cap_y = (y); \
-     if (_cap_x < 0 || _cap_y < 0 || _cap_y > MAX_MALLOC_SIZE || \
-         _cap_x > MAX_MALLOC_SIZE - _cap_y) _throw_badalloc(); \
-     (unsigned int)(_cap_x + _cap_y); })
+     if ((unsigned __int128)_cap_y > MAX_MALLOC_SIZE || \
+         (unsigned __int128)_cap_x > MAX_MALLOC_SIZE - (size_t)_cap_y) _throw_badalloc(); \
+     (size_t)_cap_x + (size_t)_cap_y; })
 
 /* Preserve original operand widths until the bounded product is validated. */
 #define _check_times(x, y) \
   ({ __auto_type _ct_x = (x); __auto_type _ct_y = (y); \
-     if (_ct_x < 0 || _ct_y < 0 || \
-         (_ct_y != 0 && _ct_x > MAX_MALLOC_SIZE / _ct_y)) _throw_badalloc(); \
-     (unsigned int)(_ct_x * _ct_y); })
+     if ((unsigned __int128)_ct_x > SIZE_MAX || \
+         (unsigned __int128)_ct_y > SIZE_MAX || \
+         (_ct_y != 0 && (size_t)_ct_x > MAX_MALLOC_SIZE / (size_t)_ct_y)) _throw_badalloc(); \
+     (size_t)_ct_x * (size_t)_ct_y; })
 
 #define _CYC_MAX_REGION_CONST 0
 #define _CYC_MIN_ALIGNMENT 16
 
 _Static_assert(_CYC_MIN_ALIGNMENT >= sizeof(double), "maximum alignment can't fit double");
 
-extern int rgn_total_bytes;
+extern size_t rgn_total_bytes;
 
 static inline void *_fast_region_malloc(struct _RegionHandle *r, _AliasQualHandle_t aq,
                                         size_t orig_s) {
-  if (r != NULL && r->curr != 0 && aq == 0 && orig_s != 0 && orig_s <= MAX_MALLOC_SIZE) {
+  if (r != NULL && r->curr != 0 && aq == 0 && orig_s != 0 && orig_s <= MAX_MALLOC_SIZE - (_CYC_MIN_ALIGNMENT - 1)) {
 #ifdef CYC_NOALIGN
     size_t s = orig_s;
 #else

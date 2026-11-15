@@ -24,3 +24,14 @@ int abi_apply_int(int (*f)(int),int x) { return f(x); }
 long abi_apply_long(long (*f)(long),long x) { return f(x); }
 int abi_apply_reader(int (*f)(int *),int *p) { return f(p); }
 struct abi_small abi_apply_small(struct abi_small (*f)(struct abi_small),struct abi_small x) { return f(x); }
+
+/* Normal checks stay small; optional runs exercise real multi-GiB storage. */
+#include <stdlib.h>
+unsigned long abi_allocation_count(void) {
+  const char *s=getenv("CYC_ALLOCATION_COUNT");
+  return s ? strtoul(s,NULL,0) : 65553UL;
+}
+unsigned long abi_initialized_count(void) {
+  const char *s=getenv("CYC_INITIALIZED_COUNT");
+  return s ? strtoul(s,NULL,0) : 4097UL;
+}

@@ -30,7 +30,7 @@
     exit(1);                \
   } while (0)
 
-#define MAX_ALLOC_SIZE INT_MAX
+#define MAX_ALLOC_SIZE ((size_t)PTRDIFF_MAX)
 
 // only need things here that are not in cyc_include.h, which end up
 // included because of the following:

@@ -21,7 +21,7 @@ The current candidate has passed native Linux x86-64 builds with GCC 15 and
 Clang 21 on Ubuntu 26.04, self-bootstrap convergence across 81 generated C files,
 solver/runtime tests, compiler regressions and installed-client checks. Earlier
 compiler/runtime validation also includes ASan/UBSan. CI runs GCC and Clang builds
-and installed-client tests, plus independent Banshee sanitizer tests.
+and installed-client tests, plus Banshee and runtime sanitizer tests.
 
 This is an actively developed candidate, not a claim that every historical
 Cyclone feature or platform has been verified. Native objects use the new LP64
@@ -30,6 +30,9 @@ trusted input from the same build and ABI; custom expression types need codecs.
 The arithmetic prover still uses 32-bit terms, so wide operations retain
 conservative runtime checks. See [native/README.md](native/README.md) for
 semantics, supported driver options, validation details and remaining limits.
+Cyclone allocation sizes are native width with checked overhead; objects must
+be smaller than `PTRDIFF_MAX`. One historical existential-array application
+remains an explicit expected failure; see [application coverage](native/APPLICATIONS.txt).
 
 ## Dependencies
 
@@ -67,7 +70,7 @@ export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFI
 Build products and logs stay under `build/native`. The bootstrap uses tracked
 sources; no downloaded bootstrap binary or previous Cyclone installation is
 needed. `make check` covers Banshee, region persistence, runtime bounds and GC,
-Cyclone diagnostics and rejection tests, native layouts, the upstream test suite,
+Cyclone diagnostics and rejection tests, native layouts, the upstream library suite and historical application tests,
 compiler units, and bootstrap convergence. `make install` also compiles and runs
 small clients using the installed libraries and headers.
 

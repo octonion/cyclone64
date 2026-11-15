@@ -1,7 +1,9 @@
 /* Platform allocator bridge for an explicitly selected BDW-GC build.
  * The malloc-backed nogc build remains available for ASan redzones. */
 #ifdef CYC_USE_SYSTEM_GC
+#define GC_THREADS 1
 #include <gc/gc.h>
+#include <gc/gc_pthread_redirects.h>
 #include <stdio.h>
 #include "cyc_include.h"
 
@@ -19,6 +21,11 @@ const char *__asan_default_options(void) {
   return "allow_user_segv_handler=1:detect_stack_use_after_return=0";
 }
 #endif
+
+int _cyc_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+                        void *(*start)(void *), void *arg) {
+  return GC_pthread_create(thread, attr, start, arg);
+}
 
 void *cyc_vmalloc(size_t size) {
   void *p = GC_malloc(size);

@@ -482,10 +482,9 @@ extern char *sprintf(); /* Sun includes don't define sprintf */
     bufsize.  */
 
 #include "bget.h"
+#include <limits.h>
 
-#define MemSize                              \
-  int /* Type for size arguments to memxxx() \
-         functions such as memcmp(). */
+#define MemSize size_t
 
 /* Queue links */
 
@@ -675,9 +674,10 @@ void *bget(bget_rgn_key_t regkey, bufsize requested_size) {
 #endif
   UNPACK_REGION(regkey);
 
-  if (size <= 0) {
-    assert(size > 0);
-  }
+  // bufsize is signed: validate alignment and both headers before adding.
+  // The acquisition path adds a bdhead after the normal bhead accounting.
+  if (size <= 0 || (unsigned long)size > (unsigned long)LONG_MAX -
+      sizeof(struct bdhead) - SizeQ - SizeQuant) return NULL;
 
   if (size < SizeQ) { /* Need at least room for the */
     size = SizeQ;     /*    queue links.  */

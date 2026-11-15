@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -94,4 +95,11 @@ try:
             run(cc+[*cflags,*products,'-Wl,--start-group',resolve('library'),
                     '-Wl,--end-group',*ldflags,*config['libs'],'-o',a.output or 'a.out'])
 except subprocess.CalledProcessError as e:
-    sys.exit(e.returncode if e.returncode > 0 else 1)
+    if e.returncode < 0:
+        number = -e.returncode
+        try: name = signal.Signals(number).name
+        except ValueError: name = str(number)
+        print(f"cyclone64: {Path(e.cmd[0]).name} terminated by signal {name} ({number})",
+              file=sys.stderr)
+        sys.exit(128 + number)
+    sys.exit(e.returncode)

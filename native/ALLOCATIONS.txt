@@ -1,0 +1,40 @@
+Native allocation audit
+=======================
+
+Cyclone (separate from Banshee):
+- Counts and byte sizes preserve source width until checked. Negative counts,
+  >size_t inputs, multiplication and terminator/header additions are rejected.
+- new/comprehension lengths, byte temporaries and generated loop counters use
+  unsigned long on LP64. Wide source bounds also receive wide index variables.
+- numelts returns unsigned long; zero-terminated runtime scans and offsets use
+  size_t. strlen/strcmp no longer truncate incoming fat-pointer extents.
+  Historical container/string routines with narrow counts or temporaries still
+  need a separate audit; this does not promise large-object support for every
+  standard-library operation.
+- Public allocation functions use size_t. Objects and region pages are bounded
+  below PTRDIFF_MAX so subtraction and bget's signed long sizes are representable.
+- Reference-count headers, alignment padding, region growth and page headers
+  are checked before additions. bget checks its own alignment/header arithmetic
+  and uses size_t for memset/memcpy lengths, including buffers beyond 4 GiB.
+- Generated sizeof/layout widths and zero-terminated pointer-conversion sizes
+  retain native width through C temporaries. Terminator bounds use checked
+  addition rather than overflowing the source count type.
+- Region/page accounting and profiling counters are size_t; public region byte
+  queries return unsigned long. This changes runtime ABI: rebuild all objects.
+- The 32-bit arithmetic prover remains conservative for wide runtime counts.
+- Banshee's separate allocator/persistence policy is unchanged.
+
+Tests:
+- gc-allocation and runtime-bounds cover zero, negative, wide, overflow and
+  single evaluation without attempting unrepresentable allocations.
+- allocation64 and comprehension64 reject genuinely unrepresentable extents,
+  rather than relying on the removed historical policy limits.
+- large-allocation64 checks malloc, no-init new, initialized new, region
+  allocation, final-byte writes, numelts, single evaluation and region totals.
+  Normal tests use small sizes. Optional CYC_ALLOCATION_COUNT=4294967313 and
+  CYC_INITIALIZED_COUNT=268435473 exercise >4-GiB objects and >256-MiB loops.
+- zero-terminated-allocation verifies that writing a nonzero final byte fails
+  for a zero-terminated buffer and succeeds for @nozeroterm storage.
+
+No promise of a practically allocatable PTRDIFF_MAX-sized object is made:
+collector overhead, address-space limits and available memory still apply.

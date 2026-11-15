@@ -83,6 +83,11 @@ void GC_register_finalizer_no_order(GC_PTR obj, GC_finalization_proc fn, GC_PTR 
 /* This is the platform default allocator (malloc) */
 
 #include <stdlib.h>
+#include <pthread.h>
+int _cyc_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+                        void *(*start)(void *), void *arg) {
+  return pthread_create(thread, attr, start, arg);
+}
 #include <string.h>
 
 #include "cyc_include.h"

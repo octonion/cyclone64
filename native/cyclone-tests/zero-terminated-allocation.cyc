@@ -1,0 +1,11 @@
+#include "cyclone/library/std/core.h"
+using Core;
+int main() {
+  unsigned long n=10;
+  char ?p=malloc(n);
+  try { p[n-1]='Z'; return 1; } catch { case &Array_bounds: break; default: return 2; }
+  p[n-1]='\0';
+  char ? @nozeroterm raw=malloc(n);
+  raw[n-1]='Z';
+  return raw[n-1]!='Z';
+}

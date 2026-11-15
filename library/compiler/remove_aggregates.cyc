@@ -275,13 +275,14 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
         default:
           break;
       }
+      let index_type = vd->type;
       qvar_t max = Toc::temp_var(ctxt);
       qvar_t i   = vd->name;
-      exp_t ea   = assign_exp(set_type(var_exp(i, DL), sint_type),
+      exp_t ea   = assign_exp(set_type(var_exp(i, DL), index_type),
                             set_type(signed_int_exp(0, DL), sint_type), DL);
       exp_t eb =
-          lt_exp(set_type(var_exp(i, DL), uint_type), set_type(var_exp(max, DL), uint_type), DL);
-      exp_t ec   = increment_exp(set_type(var_exp(i, DL), uint_type), PreInc, DL);
+          lt_exp(set_type(var_exp(i, DL), index_type), set_type(var_exp(max, DL), ulong_type), DL);
+      exp_t ec   = increment_exp(set_type(var_exp(i, DL), index_type), PreInc, DL);
       exp_t dest = (exp_t)env.dest;
       type_t dest_type;
       switch (compress((type_t)dest->topt)) {
@@ -291,11 +292,11 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
         default:
           dest_type = (type_t)dest->topt;
       }
-      exp_t lval = subscript_exp((exp_t)env.dest, set_type(var_exp(i, DL), uint_type), DL);
+      exp_t lval = subscript_exp((exp_t)env.dest, set_type(var_exp(i, DL), index_type), DL);
       set_type(lval, dest_type);
       if (env.native_width != NULL)
         lval = Toc::native_layout_offset(ctxt, deep_copy((exp_t)env.dest), (exp_t)env.native_width,
-                                          set_type(var_exp(i, DL), uint_type));
+                                          set_type(var_exp(i, DL), index_type));
       remove_aggrs_exp(ctxt, Env(AggrField, deep_copy(lval), env.native_width), body);
       stmt_t s = for_stmt(ea, eb, ec, exp_stmt(body, DL), DL);
       if (zero_term) {
@@ -306,20 +307,20 @@ static result_t remove_aggrs_exp(Toc::toc_context_t ctxt, env_t env, exp_t e) {
         // occurrence of lhs above.
         // FIX: I removed a cast of the 0 -- may lead to gcc warnings
         exp_t ex = assign_exp(
-            subscript_exp(deep_copy((exp_t)env.dest), set_type(var_exp(max, DL), sint_type), DL),
+            subscript_exp(deep_copy((exp_t)env.dest), set_type(var_exp(max, DL), ulong_type), DL),
             set_type(signed_int_exp(0, DL), sint_type), DL);
         if (env.native_width != NULL)
           ex = Toc::native_layout_store(ctxt,
               Toc::native_layout_offset(ctxt, deep_copy((exp_t)env.dest), (exp_t)env.native_width,
-                                         set_type(var_exp(max, DL), uint_type)),
-              (exp_t)env.native_width, set_type(uint_exp(0, DL), uint_type));
+                                         set_type(var_exp(max, DL), ulong_type)),
+              (exp_t)env.native_width, set_type(uint_exp(0, DL), ulong_type));
         s = seq_stmt(s, exp_stmt(ex, DL), DL);
       }
       // Note the generated code for an initializer is a bit uglier than
       // necessary
       noarray_remove_aggrs_exp(ctxt, other_env, bd);
-      e->r = stmt_exp(seq_stmt(declare_stmt(max, uint_type, bd,
-                                            declare_stmt(i, uint_type, NULL, s, DL), DL),
+      e->r = stmt_exp(seq_stmt(declare_stmt(max, ulong_type, bd,
+                                            declare_stmt(i, index_type, NULL, s, DL), DL),
                                exp_stmt(set_type(signed_int_exp(0, DL), sint_type), DL), DL),
                       DL)
                  ->r;

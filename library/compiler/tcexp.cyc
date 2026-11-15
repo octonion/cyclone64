@@ -421,7 +421,7 @@ static type_t tcUnPrimop(Tc::tc_context_t ctx, tenv_t te, seg_t loc, type_t *top
         default:
           Warn::err2(loc, "numelts requires pointer type, not ", t);
       }
-      return uint_type;
+      return ulong_type;
     case Tagof:
       // should have a @thin@numelts(1)@nozeroterm pointer to a datatype
       // or datatype field -- otherwise similar to a Deref_e.
@@ -2122,6 +2122,12 @@ static type_t tcComprehension(Tc::tc_context_t ctx, tenv_t te, seg_t loc, type_t
       // here would turn a count above 2^32 into a small valid allocation.
       if (!is_integral_type((type_t)bound->topt))
         Warn::err2(bound->loc, "expecting an integral array bound, found ", bound->topt);
+  }
+  switch (compress((type_t)bound->topt)) {
+    case &AppType(&IntCon(_, sz), _):
+      if (sz == Long_sz || sz == LongLong_sz || sz == Int128_sz) vd->type = ulong_type;
+      break;
+    default: break;
   }
   // double-check that the index variable x is declared const
   if (!vd->tq.real_const)

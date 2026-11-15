@@ -2182,10 +2182,10 @@ cycstub pthread_create {
       // Then the type of join() could be changed to properly
       // communicate the type back to the caller.
   namespace Cpthread {
-    extern "C" int pthread_cycfun_wrap($(`a (*__start_routine) (`b),
-				       `b arg) @`H);
-    extern "C" int pthread_create (pthread_t @thread, const pthread_attr_t *attr,
-				   `a (*__start_routine) (`b), `b arg)
+    // This boundary is the C pthread ABI, not a polymorphic Cyclone call.
+    extern "C" void *pthread_cycfun_wrap(void *arg);
+    extern "C" int _cyc_pthread_create(pthread_t @thread, const pthread_attr_t *attr,
+                                     void *(@start)(void *), void *arg)
           __attribute__((initializes(1)));
   }
 
@@ -2194,8 +2194,8 @@ cycstub pthread_create {
     __attribute__((initializes(1)))
     {
     // FIX: heap allocation
-    return Cpthread::pthread_create(thread,attr,
-				    Cpthread::pthread_cycfun_wrap,new $(cycfun,arg));
+    return Cpthread::_cyc_pthread_create(thread,attr,
+				    Cpthread::pthread_cycfun_wrap,(void *)(new $(cycfun,arg)));
   }
 }
 hstub pthread_join {
@@ -2216,7 +2216,8 @@ struct __pair {
   void * (*cycf)(void *);
   void *arg;
 };
-void *pthread_cycfun_wrap(struct __pair *arg) {
+void *pthread_cycfun_wrap(void *opaque) {
+  struct __pair *arg = opaque;
   struct _handler_cons h;
   void *res = 0;
   int status = 0;

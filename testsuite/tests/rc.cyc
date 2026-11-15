@@ -846,7 +846,7 @@ int list_cmp(int cmp(`a,`b), list_t<`a> x1, list_t<`b> x2) {
   list_t l1 = alias_refptr(x1);
   list_t l2 = alias_refptr(x2);
   for (; l1 != NULL && l2 != NULL; ASSIGN(l1,l1->tl), ASSIGN(l2,l2->tl)) {
-    if ((unsigned)l1 == (unsigned)l2) {
+    if ((unsigned long)l1 == (unsigned long)l2) {
       drop_refptr(l1);
       drop_refptr(l2);
       return 0;
@@ -876,7 +876,7 @@ bool list_prefix(int cmp(`a,`b), list_t<`a> x1, list_t<`b> x2) {
   list_t l1 = alias_refptr(x1);
   list_t l2 = alias_refptr(x2);
   for (; l1 != NULL && l2 != NULL; ASSIGN(l1,l1->tl), ASSIGN(l2,l2->tl)) {
-    if ((unsigned)l1 == (unsigned)l2) {
+    if ((unsigned long)l1 == (unsigned long)l2) {
       drop_refptr(l1);
       drop_refptr(l2);
       return true;

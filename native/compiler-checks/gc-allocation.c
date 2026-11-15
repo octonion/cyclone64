@@ -38,13 +38,19 @@ int main(void) {
   REJECT(GC_realloc(NULL,SIZE_MAX));
   REJECT(GC_calloc(SIZE_MAX/2+1,2));
   REJECT(GC_calloc_atomic(SIZE_MAX/2+1,2));
-  REJECT(_bounded_GC_malloc((size_t)UINT_MAX+1,__FILE__,__LINE__));
-  REJECT(_bounded_GC_malloc_atomic((size_t)UINT_MAX+1,__FILE__,__LINE__));
+  REJECT(_bounded_GC_malloc((size_t)PTRDIFF_MAX,__FILE__,__LINE__));
+  REJECT(_bounded_GC_malloc_atomic((size_t)PTRDIFF_MAX,__FILE__,__LINE__));
   REJECT(_bounded_GC_calloc(SIZE_MAX/2+1,2,__FILE__,__LINE__));
   REJECT(_bounded_GC_calloc_atomic(SIZE_MAX/2+1,2,__FILE__,__LINE__));
   p=_bounded_GC_calloc(SIZE_MAX,0,__FILE__,__LINE__); GC_free(p);
-  REJECT(_check_times(0x100000001UL,1));
-  REJECT(_check_times(1,0x100000001UL));
+  assert(_check_times(0x100000001UL,1)==0x100000001UL);
+  assert(_check_times(1,0x100000001UL)==0x100000001UL);
+  assert(_check_times(INT_MAX,2)==4294967294UL);
+  assert(_check_times(UINT_MAX,2U)==8589934590UL);
+  assert(_check_alloc_plus(INT_MAX,1)==2147483648UL);
+  assert(_check_alloc_plus(UINT_MAX,1U)==4294967296UL);
+  REJECT(_check_times(PTRDIFF_MAX,1));
+  REJECT(_check_times(SIZE_MAX,2));
   REJECT(_check_times(-1L,1));
   REJECT(_check_times(1,-1L));
   REJECT(_check_times(((unsigned __int128)1<<100),1));
@@ -57,6 +63,9 @@ int main(void) {
   assert(_check_alloc_size(SIZE_MAX)==SIZE_MAX);
   unsigned count=2; assert(_check_times(count++,5)==10 && count==3);
   assert(_check_alloc_size(count++)==3 && count==4);
+  assert(_check_alloc_plus(count++,2)==6 && count==5);
+  REJECT(_check_times(((unsigned __int128)1<<100),0));
+  REJECT(_check_alloc_plus(0,-1L));
   assert(_check_times(MAX_MALLOC_SIZE,1)==MAX_MALLOC_SIZE);
   for (unsigned aq=0;aq<3;++aq) {
     REJECT(_aqual_malloc(aq,SIZE_MAX));
@@ -72,7 +81,7 @@ int main(void) {
       memset(p,0x42,91);
       REJECT(_region_malloc(&r,aq,SIZE_MAX));
       REJECT(_region_calloc(&r,aq,SIZE_MAX/2+1,2));
-      REJECT(_fast_region_malloc(&r,aq,(size_t)UINT_MAX+1));
+      REJECT(_fast_region_malloc(&r,aq,(size_t)PTRDIFF_MAX));
       if (plain) {
         void *a=_fast_region_malloc(&r,aq,0);
         void *b=_fast_region_malloc(&r,aq,0);

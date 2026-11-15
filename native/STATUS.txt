@@ -1,181 +1,34 @@
-Banshee64 / Cyclone64 native candidates — 2026-11-14
+Cyclone64 / Banshee64 current status
+===================================
 
-MAINTENANCE CLEANUP
-The obsolete Bazel build definitions, stage1 wrappers, root build.sh/update-boot,
-per-driver region Makefiles/dotest, and unused polyref prototype were removed.
-Stage0 C sources, actual compiler/runtime code, region drivers, regression cases,
-and the independent 32-bit comparison workflow remain. See CLEANUP.txt.
-The workstation's current publication builds are build/github-gcc and
-build/github-clang, installed under build/github-{gcc,clang}-final-stage/opt/.
-The current Banshee sanitizer build and the final compiler sanitizer candidates
-remain intact. Older intermediate outputs referenced below may have been removed;
-compact logs/results and scratch sources were archived outside the checkout.
+Development candidate for GNU/Linux x86-64 (LP64). The source bootstrap must
+converge across 81 generated C files. GCC and Clang are supported C backends;
+GCC preprocessing is required for libc binding generation.
 
-PUBLIC FORK PREPARATION
-Repository: https://github.com/octonion/cyclone64 (public fork of TokTok/cyclone).
-The public main branch retains upstream and native conversion history. The root
-README documents dependencies, clone/build/install commands, scope and licenses.
-CI replaces the inherited TokTok workflows with Ubuntu 26.04 GCC 15 / Clang 21
-portable x86-64 builds, native checks, relocated installation checks, and a
-standalone Clang ASan/UBSan Banshee job. CI logs are retained as artifacts.
+Compatibility review changes:
+- Driver failures report the subprocess and signal; normal exit codes survive.
+- Nested generic aggregate cache keys are normalized before comparison; boxed
+  fields preserve word storage inside abstract-memory specializations.
+- Tuple/structure callback signatures recover emitted aggregate definitions.
+- Integer unboxing and explicit pointer narrowing use a pointer-width integer.
+- C pthread creation uses a monomorphic ABI and collector-aware thread creation.
+- Heap, region and reap byte arithmetic is native width with checked overhead.
+- numelts is unsigned long; strlen/strcmp keep full incoming buffer extents.
+- Array allocation temporaries and generated comprehension loops are wide;
+  ordinary source comprehension indices retain their historical int width.
+- All top-level historical applications run, with one precise expected failure.
 
-New standalone Clang sanitizer validation exposed incompatible indirect calls
-in Banshee string hashes, typed lists and union-find combiners. Typed context
-adapters replace the casts; list sorting no longer uses a global comparator.
-Regression coverage includes signed integer callbacks, nested sorting,
-filter/drop/keep (including empty lists), and unification rollback. All seven
-Banshee clients and eight region persistence drivers now pass Clang ASan/UBSan
-with function-type checking and leak detection. This extends the prior GCC
-Banshee sanitizer evidence; it does not imply all untested callbacks are audited.
+Known remaining limits:
+- structarray.cyc: existential array valueof lowering fails (APPLICATIONS.txt).
+- Adapted variadic/union/bitfield/int128 callbacks remain unsupported.
+- The proof engine is 32-bit; wide cases use runtime checks.
+- Historical container/string routines with narrow counts still need auditing.
+- Banshee region allocations retain their near-2-GiB per-object cap; checkpoints
+  require trusted input and the same build/ABI. Custom codecs are not automatic.
+- Callback cache lookup is linear and mutex-protected; shutdown needs quiescence.
+- Cyclone objects must be smaller than PTRDIFF_MAX, including allocation overhead.
+- BDW-GC allocations are not ASan-redzoned; malloc-backed tests supplement them.
 
-Fresh GCC 15 and Clang 21 -O2 -g -march=x86-64 bootstraps and make check pass
-with these changes, each with 81/81 generated-C convergence. Build roots are
-build/github-gcc and build/github-clang; logs are native/logs/github-*.log.
-The hosted relocation check also exposed a lexer line-marker bug: a fixed
-100-byte %s filename scan truncated at spaces and silently lost long names.
-The local long-prefix checks had not detected this because ignored names left
-syntactically valid but incorrect source locations. Quoted filename parsing now
-preserves the full spelling, including escaped quotes/backslashes. Installed
-checks explicitly assert filename preservation for short spaced and long paths
-and compile the resulting C, independent of the checkout path length.
-The older paths and assessments below are historical workstation records.
-
-UNIFIED MAKE BUILD / INSTALLATION
-The root Makefile now provides all, check, install and clean. Clean GCC 15 native
-and Clang 21 -march=x86-64 builds pass with 81/81 bootstrap convergence. Both pass
-all Banshee, Cyclone, runtime and compiler checks through make check. Both
-installed drivers pass 30 executable probes, stdio, preprocessing, generated-C,
-compile-only/object linkage and pkg-config client tests. Staged installation,
-prefix relocation and paths containing spaces are verified. No-op builds,
-configuration-change rejection and clean ownership guards are verified.
-
-Current unified artifacts (relative to this repository):
-  build/unified-verify/lib/libbanshee64.a
-  build/unified-verify/lib/libcyclone64.a
-  build/unified-verify/bin/cyclone64-compiler
-Installed GCC driver:
-  build/install-staging/opt/cyclone64/bin/cyclone64
-Clang build/install:
-  build/unified-clang and build/clang-install
-Logs: native/logs/unified-*.log and build/{unified-verify,unified-clang}/logs/.
-CC selects all C compilation; LIBC_CC separately selects GCC preprocessing for
-the legacy libc-declaration parser. ARCH remains overridable throughout the
-bootstrap. The normal installed driver defaults to native layouts and refuses
-legacy layouts with the native runtime. See README.md for the Make interface.
-
-ASSESSMENT
-Satisfactory native LP64 candidates for the tested scope on seymour. No known
-remaining conversion blocker in the validated suites. This is a candidate
-assessment, not exhaustive verification of every historical language/library
-feature. Source and tests are isolated on native-lp64-seymour.
-Host: Ryzen 9 5950X, x86-64 Kubuntu. GCC 15.2.0, -O2 -g -march=native.
-Historical upstream: c19c449365671fa10acad6307a95ffffae86dc69.
-Compiler-port implementation commit: c0dc716; Make integration is recorded later.
-
-CANDIDATES (paths relative to the main repository)
-Banshee: ../cyclone-candidate-clean/native/build/libbanshee64.a
-Cyclone: ../cyclone-candidate-clean/native/bootstrap/candidate-final-gcc4/cyclone64
-Sanitizer compiler: native/bootstrap/candidate-final-asan3/cyclone64
-Both compiler artifacts are x86-64 ELF executables. They are translators; use
-native/bootstrap-stage1.py and the documented test drivers for preprocessing,
-C compilation and linking with their matching standard-library/runtime objects.
-Source-built compilers default to native layouts. --native-layouts is an explicit
-spelling; --legacy-layouts is bootstrap-only. Never mix the two object ABIs.
-
-VALIDATION
-Banshee: 7 independent regression programs and 8 upstream region persistence
-drivers pass in the freshly prepared GCC checkout. Prior GCC 14, Clang,
-ASan/UBSan and NMEMDEBUG passes remain logged. Coverage includes region ownership,
-containers, unification, constraints, SetIF/SetST, nested rollback, checkpoint
-relocation, propagation after restore, and reset/reinitialization.
-The standalone archive has no Cyclone/libffi/libcrypto/BDW-GC dependency.
-
-Cyclone final GCC and Clang sanitizer candidates both pass:
-- 8 exact diagnostic tests, with audited compiler-specific macro columns.
-- 4 rejection tests for out-of-range integer literals.
-- 15 native executable probes: integral ranks/literals, ABI and C structs,
-  callbacks, allocation, bounds, identity, null aliases, tuples, wide proofs,
-  comprehensions and zero-terminated pointers.
-- 15 generic-layout probes: references, callbacks, allocation, stack/static
-  arrays, nested matrices, aggregate aliases, pointer fields, datatype patterns,
-  existential metadata, tagged unions and field-name collisions.
-- The upstream executable library suite.
-- Pratt constant-boundary and full-width pointer-order units linked against the
-  actual generated compiler implementation.
-The final Clang native/layout probes also compile with
--Werror=incompatible-pointer-types. The upstream compiler build retains legacy
-warning allowances; do not interpret successful builds as zero-warning builds.
-
-Bootstrap convergence: 81/81 generated C files are byte-identical for BOTH
-  GCC candidate-final-gcc3 -> candidate-final-gcc4
-  Clang candidate-final-asan2 -> candidate-final-asan3
-The chains converge independently; cross-toolchain generated C is not identical.
-The clean checkout regenerated libc bindings, lexers, parser and error tables
-from tracked bootstrap sources. Source-built stages then bootstrap natively.
-No previous unverified full-build claims or inaccessible /mnt/data kit were used.
-
-Clang 21 ASan/UBSan/function instruments the compiler, standard library and
-runtime. All 15 final layout probes also pass against the separate malloc-backed
-runtime with exact redzones and fake-stack checking. Leak detection stays enabled.
-The runtime bounds unit covers large/negative indices, biased cursors, extents,
-multiplication overflow, single evaluation, and fat-pointer shrink above 4 GiB
-and PTRDIFF_MAX. The shrink reproducer fails against the old implementation and
-passes with the fix under GCC and sanitizers.
-
-KEY FINAL LOGS
-In ../cyclone-candidate-clean/native/logs/:
-  clean-prepare-fatfix2.log, clean-seed.log, clean-banshee-checks.log
-  candidate-final-gcc4.log
-  candidate-final-gcc-convergence34.json
-  candidate-final-gcc4-{all,layout,upstream,pratt,pointer}.log
-  shrink-unit-gcc.log
-In native/logs/:
-  candidate-final-asan3.log
-  candidate-final-asan-convergence23.json
-  candidate-final-asan3-{all,layout,malloc-layout,upstream,pratt,pointer}.log
-  shrink-baseline.log, shrink-fixed.log
-Each bootstrap/test directory retains exact commands, generated C and individual
-logs. Earlier failed checkpoints are retained as diagnostic evidence.
-Use native/compare-bootstrap.py to reproduce the byte-for-byte comparisons.
-
-IMPORTANT REPAIRS
-Generic values retain native addresses and actual memory widths through calls,
-allocation, references, arrays, callbacks and existential packages. Aggregate
-lowering preserves original storage. Erased pointer fields and datatype/pattern
-projections have explicit concrete views; static generic arrays pack constants
-into their logical prefix. The native C ABI is tested with mixed and small
-structures and bound callbacks invoked by C.
-
-Wide arithmetic is opaque to the 32-bit proof engine; fat-pointer and wide-index
-bounds checks remain at runtime. Undefined Pratt arithmetic remains symbolic.
-Pointer identity/order uses full-width bits. Fat indexing checks the final
-selected address; extents and shrink products are checked before narrowing or
-overflow. Const zero-terminated input is accepted by read-only scan helpers.
-Native generator dependency files now rebuild tools after runtime-header edits.
-
-SCOPE / LIMITS
-Banshee persistence is same-build, same-ABI, trusted-input checkpointing. Custom
-and flowrow expressions require their own codecs. The old serialize_cs helper
-remains a stub; use the tested module/object API. Cross-build/cross-ABI snapshots
-and hostile-data decoding are not established. Region allocation is pointer-word
-aligned, not over-aligned; individual allocations remain capped near 2 GiB.
-
-Production uses BDW-GC 8.2.12, which does not provide malloc-ASan payload redzones.
-Its bridge defaults detect_stack_use_after_return=0 because it cannot scan ASan
-fake stacks. Separate malloc-backed probes retain those checks. No leak-ignore
-list or detect_leaks=0 is used. Libffi 3.5.2 is a runtime dependency; libcrypto is
-used for compiler type digests. Generated C uses -fno-strict-aliasing.
-Callback caches live for process lifetime; shutdown requires quiescent callers.
-The 2,048-closure stress test, live-cache roots and deliberate 73-byte leak control
-remain validated. Unsupported adapted variadic/union/bitfield/int128 callback
-signatures are rejected. Long/long-long constant patterns and untagged-union
-unpacking patterns remain historical language restrictions. Conservative runtime
-checks have a performance cost that has not been benchmarked.
-
-REFERENCE / DESKTOP
-Historical ILP32 checkout and executable remain at ../cyclone-reference32 and
-../reference32-build/cyclone32. Common behavior comparisons and inherited failures
-are logged; see REFERENCE32.txt. A private extracted multilib sysroot avoided host
-package changes. The aggregate-array aliasing failure was also present in ILP32.
-Desktop coredump count remains 30. Expected-abort tests use child-only exit
-handling; no global crash-handler settings were changed.
+Current commands and logs are under the selected BUILD directory. Historical
+workstation paths and prior validation snapshots are in HISTORY.txt and
+HISTORICAL-VALIDATION.md. See README.md for build/install usage.

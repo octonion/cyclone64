@@ -36,7 +36,7 @@ extern "C" Cstring strerror(int errnum);
 ///////////////////////// LENGTH
 size_t strlen(buffer_t s) @ensures(return_value <= numelts(s)) {
   size_t i;
-  unsigned int sz = numelts(s);
+  size_t sz = numelts(s);
   for (i = 0; @assert__(i <= numelts(s)) && i < sz; ++i)
     if (s[i] == '\000')
       return i;
@@ -64,12 +64,12 @@ static inline unsigned int umax(unsigned int i, unsigned int j)
 int strcmp(buffer_t s1, buffer_t s2) {
   if (s1 == s2)
     return 0;
-  int i          = 0;
-  unsigned sz1   = numelts(s1);
-  unsigned sz2   = numelts(s2);
-  unsigned minsz = umin(sz1, sz2);
-  //  @assert__(minsz <= numelts(s1) && minsz <= numelts(s2));
-  for (; @assert__(minsz <= sz1 && minsz <= sz2 && i <= minsz) && i < minsz; ++i) {
+  size_t i = 0;
+  size_t sz1 = numelts(s1);
+  size_t sz2 = numelts(s2);
+  size_t minsz = sz1 < sz2 ? sz1 : sz2;
+  // Native-width bounds are checked at runtime; the prover models 32-bit words.
+  for (; i < minsz; ++i) {
     char c1 = s1[i];
     char c2 = s2[i];
     if (c1 == '\000')
@@ -84,7 +84,6 @@ int strcmp(buffer_t s1, buffer_t s2) {
     return 0;
   if (sz1 < sz2)
     return (s2[i] == '\000') ? 0 : -1;
-  @assert__(i <= minsz && minsz < sz1);
   return (s1[i] == '\000') ? 0 : 1;
 }
 

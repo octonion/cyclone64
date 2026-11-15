@@ -163,14 +163,14 @@ void _pop_region() {
   _npop_frame(0);
 }
 
-int rgn_total_bytes = 0;
-static int rgn_freed_bytes = 0;
-static int heap_total_bytes = 0;
-static int heap_total_atomic_bytes = 0;
-static int unique_total_bytes = 0;
-static int unique_freed_bytes = 0;
-static int refcnt_total_bytes = 0;
-static int refcnt_freed_bytes = 0;
+size_t rgn_total_bytes = 0;
+static size_t rgn_freed_bytes = 0;
+static size_t heap_total_bytes = 0;
+static size_t heap_total_atomic_bytes = 0;
+static size_t unique_total_bytes = 0;
+static size_t unique_freed_bytes = 0;
+static size_t refcnt_total_bytes = 0;
+static size_t refcnt_freed_bytes = 0;
 
 // exported in core.h
 #define CYC_CORE_HEAP_REGION (NULL)
@@ -287,7 +287,7 @@ static void *region_malloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, 
     if (aq == CYC_CORE_REFCNT_AQUAL) {
       // need to add a word for the reference count.  We use a word to
       // keep the resulting memory aligned.  Then bump the pointer.
-      refcnt_t *result = _bounded_GC_malloc(s + sizeof(refcnt_t), __FILE__, __LINE__);
+      refcnt_t *result = _bounded_GC_malloc(region_size_add(s, sizeof(refcnt_t)), __FILE__, __LINE__);
       if (!result)
         _throw_badalloc();
       result->count = 1;
@@ -321,13 +321,13 @@ static void *region_malloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, 
     // case since there's no freeing in normal regions, but just to be
     // consistent we now make the minimum size sizeof(refcnt_t)
     if (s == 0)
-      s += sizeof(refcnt_t);
+      s = region_size_add(s, sizeof(refcnt_t));
     if (aq == CYC_CORE_REFCNT_AQUAL) {  // we can now have rc pointers in any region
-      s += sizeof(refcnt_t);
+      s = region_size_add(s, sizeof(refcnt_t));
     }
 #ifndef CYC_NOALIGN
     // round s up to the nearest _CYC_MIN_ALIGNMENT value
-    s = (s + _CYC_MIN_ALIGNMENT - 1) & (~(_CYC_MIN_ALIGNMENT - 1));
+    s = region_size_add(s, _CYC_MIN_ALIGNMENT - 1) & (~(_CYC_MIN_ALIGNMENT - 1));
 #endif
     void *result;
     // if no page yet, then fetch one
@@ -362,7 +362,7 @@ static void *region_malloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, 
 // no alias qualifiers for vmalloc
 #if (defined(__linux__) && defined(__KERNEL__))
 static void *region_vmalloc_impl(struct _RegionHandle *r, size_t s) {
-  unsigned tot_bytes = s + sizeof(struct _RegionPage);
+  size_t tot_bytes = region_size_add(s, sizeof(struct _RegionPage));
   void *allocd_page = cyc_vmalloc(tot_bytes);  // rounds to n*4096 ... careful!
   if (!allocd_page)
     _throw_badalloc();
@@ -411,13 +411,13 @@ static void *region_calloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, 
     }
   } else {
     if (s == 0)
-      s += sizeof(refcnt_t);
+      s = region_size_add(s, sizeof(refcnt_t));
     if (aq == CYC_CORE_REFCNT_AQUAL) {  // we can now have rc pointers in any region
-      s += sizeof(refcnt_t);
+      s = region_size_add(s, sizeof(refcnt_t));
     }
 // round s up to the nearest _CYC_MIN_ALIGNMENT value
 #ifndef CYC_NOALIGN
-    s = (s + _CYC_MIN_ALIGNMENT - 1) & (~(_CYC_MIN_ALIGNMENT - 1));
+    s = region_size_add(s, _CYC_MIN_ALIGNMENT - 1) & (~(_CYC_MIN_ALIGNMENT - 1));
 #endif
     void *result;
     // if no page yet, then fetch one
@@ -559,7 +559,7 @@ static void *reap_malloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, si
     if (aq == CYC_CORE_REFCNT_AQUAL) {
       // need to add a word for the reference count.  We use a word to
       // keep the resulting memory aligned.  Then bump the pointer.
-      refcnt_t *result = _bounded_GC_malloc(s + sizeof(refcnt_t), __FILE__, __LINE__);
+      refcnt_t *result = _bounded_GC_malloc(region_size_add(s, sizeof(refcnt_t)), __FILE__, __LINE__);
       if (!result)
         _throw_badalloc();
       result->count = 1;
@@ -583,9 +583,9 @@ static void *reap_malloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, si
     }
   } else {
     if (s == 0)
-      s += sizeof(refcnt_t);  // see region_malloc_impl comment
+      s = region_size_add(s, sizeof(refcnt_t));  // see region_malloc_impl comment
     if (aq == CYC_CORE_REFCNT_AQUAL)
-      s += sizeof(refcnt_t);
+      s = region_size_add(s, sizeof(refcnt_t));
     if (r->curr == NULL) {  // first request ... initialize pool
       get_first_region_page(r, s, 1);
     }
@@ -619,7 +619,7 @@ static void *reap_malloc_impl(struct _RegionHandle *r, _AliasQualHandle_t aq, si
 // no alias qualifiers for vmalloc
 #if (defined(__linux__) && defined(__KERNEL__))
 static void *reap_vmalloc_impl(struct _RegionHandle *r, size_t s) {
-  unsigned tot_bytes = s + sizeof(struct _RegionPage);
+  size_t tot_bytes = region_size_add(s, sizeof(struct _RegionPage));
   void *allocd_page = cyc_vmalloc(tot_bytes);  // rounds to n*4096 ... careful!
   if (!allocd_page)
     _throw_badalloc();
@@ -845,14 +845,14 @@ void _init_regions() {
 
 void _fini_regions() {
 #ifdef CYC_REGION_PROFILE
-  fprintf(stderr, "rgn_total_bytes: %d\n", rgn_total_bytes);
-  fprintf(stderr, "rgn_freed_bytes: %d\n", rgn_freed_bytes);
-  fprintf(stderr, "heap_total_bytes: %d\n", heap_total_bytes);
-  fprintf(stderr, "heap_total_atomic_bytes: %d\n", heap_total_atomic_bytes);
-  fprintf(stderr, "unique_total_bytes: %d\n", unique_total_bytes);
-  fprintf(stderr, "unique_free_bytes: %d\n", unique_freed_bytes);
-  fprintf(stderr, "refcnt_total_bytes: %d\n", refcnt_total_bytes);
-  fprintf(stderr, "refcnt_free_bytes: %d\n", refcnt_freed_bytes);
+  fprintf(stderr, "rgn_total_bytes: %zu\n", rgn_total_bytes);
+  fprintf(stderr, "rgn_freed_bytes: %zu\n", rgn_freed_bytes);
+  fprintf(stderr, "heap_total_bytes: %zu\n", heap_total_bytes);
+  fprintf(stderr, "heap_total_atomic_bytes: %zu\n", heap_total_atomic_bytes);
+  fprintf(stderr, "unique_total_bytes: %zu\n", unique_total_bytes);
+  fprintf(stderr, "unique_free_bytes: %zu\n", unique_freed_bytes);
+  fprintf(stderr, "refcnt_total_bytes: %zu\n", refcnt_total_bytes);
+  fprintf(stderr, "refcnt_free_bytes: %zu\n", refcnt_freed_bytes);
   fprintf(stderr, "number of collections: %lu\n", GC_gc_no);
   if (alloc_log != NULL)
     fclose(alloc_log);
@@ -1034,7 +1034,7 @@ void *_profile_region_malloc(struct _RegionHandle *r, _AliasQualHandle_t aq, siz
         // bget takes two additional words
         s = bget_size(r->key, logaddr);
       } else if (aq == CYC_CORE_REFCNT_AQUAL)
-        s += sizeof(refcnt_t);
+        s = region_size_add(s, sizeof(refcnt_t));
     }
     // logging for reaps isn't exact right now. In particular, if U and RC stuff
     // allocated in a reap, aprof will still treat it as if it was in the old `U, `RC
@@ -1074,7 +1074,7 @@ void *_profile_region_calloc(struct _RegionHandle *r, _AliasQualHandle_t aq, siz
         // bget takes two additional words
         s = bget_size(r->key, logaddr);
       } else if (aq == CYC_CORE_REFCNT_AQUAL)
-        s += sizeof(refcnt_t);
+        s = region_size_add(s, sizeof(refcnt_t));
     }
     // logging for reaps isn't exact right now. In particular, if U and RC stuff
     // allocated in a reap, aprof will still treat it as if it was in the old `U, `RC
@@ -1154,7 +1154,7 @@ void *_profile_GC_calloc_atomic(size_t n, size_t s, const char *file, const char
 static size_t region_get_heap_size(struct _RegionHandle *r) {
   if (r > (struct _RegionHandle *)_CYC_MAX_REGION_CONST) {
     struct _RegionPage *p = r->curr;
-    int sz = 0;
+    size_t sz = 0;
     while (p != NULL) {
       sz += p->total_bytes;
       p = p->next;
@@ -1197,7 +1197,7 @@ static size_t region_get_total_bytes(struct _RegionHandle *r) {
       return cur;
     } else {
       struct _RegionPage *p = r->curr;
-      int sz = 0;
+      size_t sz = 0;
       while (p != NULL) {
         sz = sz + (p->total_bytes - p->free_bytes);
         p = p->next;
@@ -1205,8 +1205,8 @@ static size_t region_get_total_bytes(struct _RegionHandle *r) {
       return sz;
     }
   } else {
-    unsigned int unique_avail_bytes = unique_total_bytes - unique_freed_bytes;
-    unsigned int refcnt_avail_bytes = refcnt_total_bytes - refcnt_freed_bytes;
+    size_t unique_avail_bytes = unique_total_bytes - unique_freed_bytes;
+    size_t refcnt_avail_bytes = refcnt_total_bytes - refcnt_freed_bytes;
 #if 0
     if (r == CYC_CORE_UNIQUE_REGION)
       return unique_avail_bytes;
@@ -1222,7 +1222,7 @@ static size_t region_get_total_bytes(struct _RegionHandle *r) {
 
 static size_t region_get_heap_size(struct _RegionHandle *r) {
   if (r > (struct _RegionHandle *)_CYC_MAX_REGION_CONST) {
-    unsigned used_bytes = r->used_bytes;
+    size_t used_bytes = r->used_bytes;
     return used_bytes;
   } else
     return GC_get_heap_size();
@@ -1235,7 +1235,7 @@ static size_t region_get_free_bytes(struct _RegionHandle *r) {
       bstats(r->key, &cur, &totfree, &max, &ng, &nrel);
       return totfree;
     } else {
-      unsigned free_bytes = r->last_plus_one - r->offset;
+      size_t free_bytes = r->last_plus_one - r->offset;
       return free_bytes;
     }
   } else
@@ -1249,9 +1249,9 @@ static size_t region_get_total_bytes(struct _RegionHandle *r) {
       bstats(r->key, &cur, &totfree, &max, &ng, &nrel);
       return cur;
     } else {
-      unsigned used_bytes = r->used_bytes;
-      unsigned wasted_bytes = r->wasted_bytes;
-      unsigned free_bytes = r->last_plus_one - r->offset;
+      size_t used_bytes = r->used_bytes;
+      size_t wasted_bytes = r->wasted_bytes;
+      size_t free_bytes = r->last_plus_one - r->offset;
       return (used_bytes - wasted_bytes - free_bytes);
     }
   } else {
@@ -1261,9 +1261,9 @@ static size_t region_get_total_bytes(struct _RegionHandle *r) {
 
 #endif
 
-int region_used_bytes(struct _RegionHandle *r) { return region_get_heap_size(r); }
-int region_free_bytes(struct _RegionHandle *r) { return region_get_free_bytes(r); }
-int region_alloc_bytes(struct _RegionHandle *r) { return region_get_total_bytes(r); }
+size_t region_used_bytes(struct _RegionHandle *r) { return region_get_heap_size(r); }
+size_t region_free_bytes(struct _RegionHandle *r) { return region_get_free_bytes(r); }
+size_t region_alloc_bytes(struct _RegionHandle *r) { return region_get_total_bytes(r); }
 
 // Called from gc/alloc.c for allocation profiling.  Must be
 // defined even if CYC_REGION_PROFILE is not.

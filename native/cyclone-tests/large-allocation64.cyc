@@ -1,0 +1,33 @@
+#include "cyclone/library/std/core.h"
+#include "cyclone/library/std/string.h"
+using Core;
+extern "C" unsigned long abi_allocation_count(void);
+extern "C" unsigned long abi_initialized_count(void);
+extern "C" void GC_free(void *);
+int main() {
+  unsigned long n=abi_allocation_count();
+  char ? @nozeroterm raw=malloc(n);
+  raw[0]='A'; raw[n-1]='Z';
+  if(numelts(raw)!=n || raw[0]!='A' || raw[n-1]!='Z') return 1;
+  // A terminator beyond the truncated low 32-bit extent exposes narrow scans.
+  for (unsigned long i=0; i<32UL; ++i) raw[i]='A';
+  raw[32UL]=0;
+  if (strlen(raw)!=32UL ||
+      strcmp(raw,"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")!=0) return 5;
+  GC_free((void *)raw);
+  unsigned long count=n;
+  char ? @nozeroterm arr=new {for i<count++:char};
+  arr[0]='B'; arr[n-1]='Y';
+  if(count!=n+1 || numelts(arr)!=n || arr[n-1]!='Y') return 2;
+  GC_free((void *)arr);
+  // Initialized comprehensions exercise the generated loop and its bound.
+  unsigned long m=abi_initialized_count();
+  char ? @nozeroterm init=new {for i<m:(char)(i%127)};
+  if(numelts(init)!=m || init[m-1]!=(char)((m-1)%127)) return 3;
+  GC_free((void *)init);
+  region r;
+  char ? @nozeroterm local=rmalloc(r,n);
+  local[0]='C'; local[n-1]='X';
+  if(numelts(local)!=n || local[n-1]!='X' || region_used_bytes(r)<n) return 4;
+  return 0;
+}

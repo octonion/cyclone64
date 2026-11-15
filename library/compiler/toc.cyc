@@ -292,6 +292,11 @@ static exp_t cast_it(type_t t, exp_t e) {
         e = set_type(cast_exp(uint_type, e, false, No_coercion, DL), uint_type);
         e = set_type(cast_exp(ulong_type, e, false, No_coercion, DL), ulong_type);
         break;
+      case $(&AppType(&IntCon(_, sz), _), &PointerType(_)):
+        // Unbox through a pointer-width integer before narrowing the value.
+        if (sz == Char_sz || sz == Short_sz || sz == Int_sz)
+          e = set_type(cast_exp(ulong_type, e, false, No_coercion, DL), ulong_type);
+        break;
       default: break;
     }
   return set_type(cast_exp(t, e, false, No_coercion, DL), t);
@@ -363,7 +368,7 @@ static bool isCharStar(exp_t e) {
   }
 }
 
-#define sizeoftype_exp(e, i) (set_type(sizeoftype_exp(e, i), uint_type))
+#define sizeoftype_exp(e, i) (set_type(sizeoftype_exp(e, i), ulong_type))
 
 ///////////////////////////// Various Utilities /////////////////////////////
 
@@ -548,29 +553,24 @@ static type_t add_struct_type_body<`r2,`d,`r>(
   let $(&TocState{.abs_struct_types = abs_struct_types, ...},
         &$(ctxt, struct_name, type_vars, type_args, fields)) = *env;
 
-  // look for the same instantiation of abstract-struct-type already declared
+  // Normalize keys before searching. Translating an argument while comparing
+  // it to a cached key can re-enter this very search (Pair<Pair<...> *,...>).
+  // Cache C types, so equivalent erased instantiations still share storage.
+  list_t<type_t> key = NULL;
+  let key_vars = type_vars;
+  for (let args = type_args; args != NULL && key_vars != NULL; args = args->tl, key_vars = key_vars->tl) {
+    let kind = Kinds::tvar_kind(key_vars->hd, &Kinds::bk)->kind;
+    if (kind != EffKind)
+      key = new List(kind == BoxKind ? void_star_type(ctxt) : trans_type(ctxt, args->hd), key);
+  }
+  key = imp_rev(key);
   for (let tts = *abs_struct_types; tts != NULL; tts = tts->tl) {
     let &$(x, ts2, t) = tts->hd;
-    if (qvar_cmp(x, struct_name) == 0 && List::length(type_args) == List::length(ts2)) {
-      bool okay = true;
-      for (let ts = type_args; ts != NULL; ts = ts->tl, ts2 = ts2->tl) {
-        let t  = ts->hd;
-        let t2 = ts2->hd;
-        switch (type_kind(t)) {
-          case &Kind{.kind = EffKind, _}:
-            continue;  // Effects/regions won't appear in C types
-            //        case &Kind{.kind = RgnKind, _}:
-          default:
-            // Check if they're the same before translating them to C
-            if (Unify::unify(t, t2) || Unify::unify(trans_type(ctxt, t), trans_type(ctxt, t2)))
-              continue;
-            okay = false;
-            break;
-        }
-        break;
-      }
-      if (okay)  // found pre-existing type
-        return t;
+    if (qvar_cmp(x, struct_name) == 0 && List::length(key) == List::length(ts2)) {
+      let ts = key;
+      for (; ts != NULL && ts2 != NULL; ts = ts->tl, ts2 = ts2->tl)
+        if (Tcutil::typecmp(ts->hd, ts2->hd) != 0) break;
+      if (ts == NULL && ts2 == NULL) return t;
     }
   }
   // haven't seen this one before, add a declaration
@@ -579,10 +579,17 @@ static type_t add_struct_type_body<`r2,`d,`r>(
   type_t x          = strct(xname);
   let fs            = NULL;
   // go ahead and add this to the struct types
-  *abs_struct_types = rnew(d) List{rnew(d) $(struct_name, type_args, x), *abs_struct_types};
+  *abs_struct_types = rnew(d) List{rnew(d) $(struct_name, key, x), *abs_struct_types};
   // copy the fields over
   region r;
   let inst = List::rzip(r, r, type_vars, type_args);
+  // Boxed fields keep their erased word representation even when the final
+  // abstract-memory field specializes the enclosing structure.
+  let specialized = NULL;
+  for (let bs = inst; bs != NULL; bs = bs->tl)
+    if (Kinds::tvar_kind((*bs->hd)[0], &Kinds::bk)->kind != BoxKind)
+      specialized = rnew(r) List(bs->hd, specialized);
+  inst = specialized;
   for (; fields != NULL; fields = fields->tl) {
     let f             = fields->hd;
     type_t t          = f->type;
@@ -1487,7 +1494,23 @@ static string_t callback_signature(toc_context_t ctxt, type_t t) {
       aggrdecl_t ad;
       switch (info) {
         case {.KnownAggr = &known}: ad = known; break;
-        default: return "";
+        case {.UnknownAggr = $(kind, name, _)}:
+          // Translated named types deliberately drop their implementation.
+          // Recover the generated definition for tuple/specialized returns.
+          aggrdecl_t *found = NULL;
+          for (let ds = ctxt->result_decls; ds != NULL; ds = ds->tl) {
+            switch (ds->hd->r) {
+              case &Aggr_d(def):
+                if (def->kind == kind && qvar_cmp(def->name, name) == 0 && def->impl != NULL)
+                  found = new def;
+                break;
+              default: break;
+            }
+            if (found != NULL) break;
+          }
+          if (found == NULL) return "";
+          ad = *found;
+          break;
       }
       if (ad->kind != StructA || ad->impl == NULL) return "";
       let label = Absynpp::typ2string(t);
@@ -1552,6 +1575,26 @@ static type_t aggregate_field_type(toc_context_t ctxt, type_t aggregate, field_n
     case &AppType(&AggrCon(info), _):
       let ad = get_known_aggrdecl(info);
       if (ad->impl == NULL) return void_type;
+      // A specialized abstract-memory structure can have concrete pointer
+      // fields different from the original generic declaration.
+      let converted = compress(typ_to_c(ctxt, aggregate));
+      switch (converted) {
+        case &AppType(&AggrCon(ci), _) && ad->kind == StructA:
+          let cname = aggr_kinded_name(ci)[1];
+          for (let ds = ctxt->result_decls; ds != NULL; ds = ds->tl) {
+            switch (ds->hd->r) {
+              case &Aggr_d(def):
+                if (qvar_cmp(def->name, cname) == 0 && def->impl != NULL) {
+                  let cf = lookup_field(def->impl->fields, name);
+                  if (cf != NULL) return cf->type;
+                }
+                break;
+              default: break;
+            }
+          }
+          break;
+        default: break;
+      }
       let field = lookup_field(ad->impl->fields, name);
       if (field == NULL) return void_type;
       return typ_to_c(ctxt, field->type);
@@ -1794,7 +1837,7 @@ static exp_opt_t array_length_exp(exp_t e) {
     case &ComprehensionNoinit_e(bd, _, zt):
       bd = deep_copy(bd);
       return zt ? set_type(fncall_exp_dl(_check_alloc_plus_e, bd,
-                          set_type(uint_exp(1, DL), uint_type)), uint_type) : bd;
+                          set_type(uint_exp(1, DL), uint_type)), ulong_type) : bd;
     default:
       return NULL;
   }
@@ -1853,11 +1896,11 @@ static exp_opt_t get_varsizeexp(exp_t e) {
           // FIX: as was try before, we execute the bound twice, and once
           //      in a position where the flow analysis does not expect
           return set_type(
-              add_exp(set_type(fncall_exp_dl(_check_times_e, (exp_t)array_length_exp(e2),
+              fncall_exp_dl(_check_alloc_plus_e, set_type(fncall_exp_dl(_check_times_e, (exp_t)array_length_exp(e2),
                                              sizeoftype_exp(elt_type, DL)),
-                               uint_type),
-                      set_type(signed_int_exp(PAD_BYTES, DL), sint_type), DL),
-              uint_type);
+                               ulong_type),
+                      set_type(signed_int_exp(PAD_BYTES, DL), sint_type)),
+              ulong_type);
         default:
           return NULL;
       }
@@ -2101,7 +2144,7 @@ static void zero_ptr_assign_to_c(env_t nv, exp_t e, exp_t e1, primop_opt_t popt,
     let oneexp = set_type(uint_exp(1, DL), uint_type);
     exp_t xsize;
     xsize =
-        prim2_exp(Eq, set_type(fncall_exp(_get_fat_size_e, xsizeargs, DL), uint_type), oneexp, DL);
+        prim2_exp(Eq, set_type(fncall_exp(_get_fat_size_e, xsizeargs, DL), ulong_type), oneexp, DL);
     // start assembling the statement
     let comp_exp    = and_exp(xsize, and_exp(comp1_exp, comp2_exp, DL), DL);
     let thr_stmt    = exp_stmt(set_type(fncall_exp_dl(_throw_arraybounds_e), void_star_type(nv->ctxt)), DL);
@@ -2736,7 +2779,7 @@ void exp_to_c(env_t nv, exp_t e) {
             set_type(
                 fncall_exp_dl(_tag_fat_e,
                               set_type((num_varargs == 0 ? uint_exp(0, DL) : argvexp), uint_type),
-                              set_type(sizeoftype_exp(cva_type, DL), uint_type), num_varargs_exp),
+                              set_type(sizeoftype_exp(cva_type, DL), ulong_type), num_varargs_exp),
                 fat_ptr_type(nv->ctxt)),
             new_args);
         new_args = imp_rev(new_args);
@@ -2954,9 +2997,9 @@ void exp_to_c(env_t nv, exp_t e) {
                       arg3 = fncall_exp_dl(
                           _get_zero_arr_size_other_e,
                           set_type(native_layout_size(nv->ctxt, pointer_elt_type(old_t2)),
-                                   uint_type),
+                                   ulong_type),
                           x_exp, e2);
-                    arg3->topt = uint_type;
+                    arg3->topt = ulong_type;
                     break;
                 }
                 // If p2 is not zero-terminated and not const, then we subtract
@@ -2965,7 +3008,7 @@ void exp_to_c(env_t nv, exp_t e) {
                 if (!zt2 && !p2.elt_tq.real_const)
                   arg3 = set_type(prim2_exp(Minus, arg3, set_type(uint_exp(1, DL), uint_type), DL),
                                   (type_t)arg3->topt);
-                let arg2 = set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type);
+                let arg2 = set_type(native_layout_size(nv->ctxt, p1.elt_type), ulong_type);
                 if (use_temp) {
                   let tg_exp   = fncall_exp_dl(_tag_fat_e, x_exp, arg2, arg3);
                   tg_exp->topt = fat_ptr_type(nv->ctxt);
@@ -2977,7 +3020,7 @@ void exp_to_c(env_t nv, exp_t e) {
               } else
                 // build the t ? struct
                 e->r = fncall_exp_r(_tag_fat_e, e1,
-                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type),
+                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), ulong_type),
                                     e2);
               break;
             case $(NULL,
@@ -2992,7 +3035,8 @@ void exp_to_c(env_t nv, exp_t e) {
               // that the size is at least 2+1=3.
               let new_e2 = (exp_t)b2;
               if (zt1 && !zt2)
-                new_e2 = set_type(add_exp(b2, set_type(uint_exp(1, DL), uint_type), DL), uint_type);
+                new_e2 = set_type(fncall_exp_dl(_check_alloc_plus_e, b2,
+                                  set_type(uint_exp(1, DL), ulong_type)), ulong_type);
               let ptr_exp = e1;
 
               // ?`RC to *`RC requires current to be at base, else arraybounds
@@ -3015,14 +3059,14 @@ void exp_to_c(env_t nv, exp_t e) {
                   // for t@: _check_null(_untag_arr(e1, sizeof(t), new_e2))
                   ptr_exp = set_type(
                       fncall_exp_dl(_untag_fat_ptr_check_bound_e, ptr_exp,
-                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type),
+                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), ulong_type),
                                     new_e2),
                       cstar_type(uchar_type, mt_tq));
                   break;
                 default:
                   ptr_exp = set_type(
                       fncall_exp_dl(_untag_fat_ptr_e, ptr_exp,
-                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type),
+                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), ulong_type),
                                     new_e2),
                       cstar_type(uchar_type, mt_tq));
                   break;
@@ -3041,7 +3085,7 @@ void exp_to_c(env_t nv, exp_t e) {
                       "can't coerce a ZEROTERM to a non-const NOZEROTERM "
                       "pointer at toplevel");
                 e->r = fncall_exp_r(_fat_ptr_decrease_size_e, e1,
-                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), uint_type),
+                                    set_type(native_layout_size(nv->ctxt, p1.elt_type), ulong_type),
                                     set_type(uint_exp(1, DL), uint_type));
               }
               break;
@@ -3056,6 +3100,7 @@ void exp_to_c(env_t nv, exp_t e) {
             default:
               break;
           }
+          e->r = cast_it_r(new_typ_c, e1);
           break;
         default:
           if (Unify::unify(old_t2_c, new_typ_c))
@@ -3107,7 +3152,7 @@ void exp_to_c(env_t nv, exp_t e) {
       exp_t mexp;
       if (array_len != NULL) {
         lenvar = temp_var(nv->ctxt);
-        lenexp = set_type(var_exp((qvar_t)lenvar, DL), uint_type);
+        lenexp = set_type(var_exp((qvar_t)lenvar, DL), ulong_type);
         mexp   = fncall_exp_dl(_check_times_e, lenexp, native_width ? deep_copy(native_width) : sizeoftype_exp(elt_typ, DL));
         // e1 could be a comprehension -- in which case, we're duplicating
         // the bounds expression here (which could have effects.)  So we
@@ -3117,19 +3162,19 @@ void exp_to_c(env_t nv, exp_t e) {
             fallthru(bd, zt);
           case &ComprehensionNoinit_e(*bd, _, zt):
             *bd = zt ? set_type(prim2_exp(Minus, deep_copy(lenexp),
-                         set_type(uint_exp(1, DL), uint_type), DL), uint_type) : deep_copy(lenexp);
+                         set_type(uint_exp(1, DL), ulong_type), DL), ulong_type) : deep_copy(lenexp);
             break;
           default:
             break;
         }
       } else
         mexp = native_width ? deep_copy(native_width) : sizeoftype_exp(elt_typ, DL);
-      mexp->topt = uint_type;
+      mexp->topt = ulong_type;
       // deal with the struct hack (executing the bound twice and suffering
       // an unnecessary copy of the data)
       let vse = get_varsizeexp(e1);
       if (vse != NULL)
-        mexp = set_type(add_exp(mexp, vse, DL), uint_type);
+        mexp = set_type(fncall_exp_dl(_check_alloc_plus_e, mexp, vse), ulong_type);
 
       if ((rgnopt == NULL && qual == NULL) || Flags::no_regions)
         mexp = malloc_exp(nv->ctxt, elt_typ, mexp);
@@ -3148,15 +3193,15 @@ void exp_to_c(env_t nv, exp_t e) {
       if (is_fat_ptr(old_typ)) {
         let e2 = set_type(deep_copy(e), cstar_type(elt_typ, mt_tq));
         e->r   = fncall_exp_dl(_tag_fat_e, e2, native_width ? deep_copy(native_width) : sizeoftype_exp(elt_typ, DL),
-                             (lenexp ? lenexp : set_type(uint_exp(1, DL), uint_type)))
+                             (lenexp ? lenexp : set_type(uint_exp(1, DL), ulong_type)))
                    ->r;
       }
       if (vse != NULL)  // in case of the struct hack, types do not line up
         e->r = cast_it_r(typ_to_c(nv->ctxt, old_typ), deep_copy(e));
       if (array_len) {
-        let s = declare_stmt((qvar_t)lenvar, uint_type,
+        let s = declare_stmt((qvar_t)lenvar, ulong_type,
                              set_type(fncall_exp_dl(_check_times_e, (exp_t)array_len,
-                                      set_type(uint_exp(1, DL), uint_type)), uint_type),
+                                      set_type(uint_exp(1, DL), ulong_type)), ulong_type),
                              exp_stmt(deep_copy(e), DL), DL);
         e->r  = stmt_exp_r(s);
       }
@@ -3384,7 +3429,7 @@ void exp_to_c(env_t nv, exp_t e) {
               if (adapter != NULL) *fieldexp = *adapter;
               // Field declarations retain erased pointer types. Adapt callbacks
               // first, then make object-pointer representation casts explicit.
-              let stored_type = typ_to_c(nv->ctxt, aggrfield->type);
+              let stored_type = aggregate_field_type(nv->ctxt, old_typ, aggrfield->name);
               if (is_pointer_type(stored_type) &&
                   is_pointer_type((type_t)fieldexp->topt) &&
                   Tcutil::typecmp(stored_type, (type_t)fieldexp->topt) != 0) {
@@ -3508,7 +3553,7 @@ void exp_to_c(env_t nv, exp_t e) {
             for (let fields2 = fields; fields2 != NULL; fields2 = fields2->tl) {
               if ((*fields2->hd)[0] == sdfields->hd) {
                 let &$(field, fieldexp) = fields2->hd;
-                let fieldtyp            = typ_to_c(nv->ctxt, field->type);
+                let fieldtyp            = aggregate_field_type(nv->ctxt, old_typ, field->name);
                 let fieldexp_typ        = typ_to_c(nv->ctxt, (type_t)fieldexp->topt);
                 exp_to_c(nv, fieldexp);
                 if (Flags::native_layouts && is_array_type(field->type) && native_layout_dependent(field->type)) {

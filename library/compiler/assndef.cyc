@@ -1226,7 +1226,7 @@ term_t unop(Absyn::primop_t p, term_t t, type_opt_t tp) {
   return hash_cons_term(&ptr);
 }
 
-term_t numelts_term(term_t t) { return unop(Absyn::Numelts, t, Absyn::uint_type); }
+term_t numelts_term(term_t t) { return unop(Absyn::Numelts, t, Absyn::ulong_type); }
 
 // Need to fake up vardecls for the "memory" and "exception"
 using Absyn {

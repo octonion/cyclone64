@@ -113,3 +113,7 @@ $(BUILD)/check-callback-ffi: native/compiler-checks/callback-ffi.c library/runti
 $(BUILD)/check-type-name: native/compiler-checks/type-name.c library/compiler/inference/type_name.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) $^ $(LDFLAGS) $(shell pkg-config --cflags --libs libcrypto) -o $@
+
+$(BUILD)/check-allocation-width: native/compiler-checks/allocation-width.c library/runtime/runtime_memory.c library/runtime/bget.c library/std/cyc-lib/cyc_include.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(ARCH) $(CFLAGS) -ffunction-sections -fdata-sections -Ilibrary/std/cyc-lib $(filter %.c,$^) -Wl,--gc-sections $(LDFLAGS) -o $@

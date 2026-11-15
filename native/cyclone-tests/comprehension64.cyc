@@ -3,7 +3,7 @@ using Core;
 extern "C" unsigned long abi_large_index(void);
 extern "C" void GC_free(void *);
 int main(int argc, string_t ?argv) {
-  unsigned long count=abi_large_index()+15UL;
+  unsigned long count=0x8000000000000000UL;
   region r;
   try { int ?p=rnew(r) {for i<count:0}; return 1; }
   catch { case &Bad_alloc: break; default: return 99; }
@@ -21,5 +21,11 @@ int main(int argc, string_t ?argv) {
   char ?@zeroterm heap=new {for i<3:'x'};
   if (numelts(heap)!=4 || heap[2]!='x' || heap[3]!=0) return 6;
   GC_free((void *)heap);
+  unsigned short_count=3;
+  unsigned ?widths=new {for i<short_count:(unsigned)sizeof(i)};
+  if(widths[2]!=4) return 7;
+  unsigned ?wide_widths=new {for i<small:(unsigned)sizeof(i)};
+  if(wide_widths[2]!=8) return 8;
+  GC_free((void *)widths); GC_free((void *)wide_widths);
   return 0;
 }

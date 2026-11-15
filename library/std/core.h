@@ -147,15 +147,15 @@ __noinference__ {
     extern datatype exn.Not_found Not_found_val;
     extern datatype exn{extern Unreachable(string_t)};
 
-    extern "C" int region_used_bytes(region_t<`r>);
+    extern "C" unsigned long region_used_bytes(region_t<`r>);
     /** [region_used_bytes] returns the number of bytes
         currently allocated for region pages for Cyclone objects;
         i.e., does not account for overhead of region page
         data structures. */
-    extern "C" int region_free_bytes(region_t<`r>);
+    extern "C" unsigned long region_free_bytes(region_t<`r>);
     /** [region_free_bytes] returns the number of bytes
         currently free in the current region page. */
-    extern "C" int region_alloc_bytes(region_t<`r>);
+    extern "C" unsigned long region_alloc_bytes(region_t<`r>);
     /** [region_alloc_bytes] returns the number of bytes
         of allocated Cyclone objects in the region. */
 

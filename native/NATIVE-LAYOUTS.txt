@@ -52,5 +52,6 @@ trades some check elimination for correct LP64 behavior. Runtime indexing checks
 the final address, including accesses through temporarily biased cursors, and
 validates wide extents before narrowing or multiplying.
 
-See STATUS.txt for the current candidate stage names, validation and scope. Each bootstrap/test directory retains exact commands, generated C and logs;
+See STATUS.txt for current capabilities and remaining limits. Each
+bootstrap/test directory retains exact commands, generated C and logs;
 earlier failed checkpoints are diagnostic evidence, not current success claims.

@@ -16,10 +16,11 @@ Compatibility review changes:
 - numelts is unsigned long; strlen/strcmp keep full incoming buffer extents.
 - Array allocation temporaries and generated comprehension loops are wide;
   ordinary source comprehension indices retain their historical int width.
-- All top-level historical applications run, with one precise expected failure.
+- All 31 top-level historical applications must pass, including structarray.
+- Existential arrays retain erased storage offsets and native element strides;
+  unsized pattern projections retain the original allocation (EXISTENTIAL-ARRAYS.md).
 
 Known remaining limits:
-- structarray.cyc: existential array valueof lowering fails (APPLICATIONS.txt).
 - Adapted variadic/union/bitfield/int128 callbacks remain unsupported.
 - The proof engine is 32-bit; wide cases use runtime checks.
 - Historical container/string routines with narrow counts still need auditing.

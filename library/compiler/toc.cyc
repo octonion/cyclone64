@@ -1685,6 +1685,20 @@ static enum PTR_ANS ptr_use_to_c(env_t nv, exp_t ptr, absyn_annot_t annot, exp_o
         let call = bd == NULL
           ? fncall_exp_dl(_check_fat_subscript_e, deep_copy(ptr), width, ind)
           : fncall_exp_dl(_check_known_subscript_null_e, deep_copy(ptr), (exp_t)bd, width, ind);
+        // A thin bound can be a type-only valueof(existential). InsertChecks
+        // accepts such an access only after proving it in bounds; do not
+        // reintroduce that erased bound as a C expression. Keep the native
+        // element stride and any required null check. Fat cursors still use
+        // the runtime check, including their lower bound.
+        if (bd != NULL) switch (annot) {
+          case &InsertChecks::NullOnly:
+            ptr->r = fncall_exp_dl(_check_null_e, deep_copy(ptr))->r;
+            fallthru;
+          case &InsertChecks::NoCheck:
+            call = native_layout_offset(nv->ctxt, deep_copy(ptr), width, ind);
+            break;
+          default: break;
+        }
         bool array = is_array_type(ta);
         let result_type = array ? typ_to_c_array(nv->ctxt, ta)
                                 : cstar_type(void_star_type(nv->ctxt), tq);
@@ -3460,6 +3474,15 @@ void exp_to_c(env_t nv, exp_t e) {
               // Note: unions cannot have abstract mem-kind fields
               if (is_abstract_type(old_typ) && last_typ_field == aggrfield) {
                 let inst = append(zip(sd->impl->exist_vars, exist_ts), zip(sd->tvs, param_ts));
+                // As in add_struct_type_body, specialize lengths and abstract
+                // memory types, but retain boxed storage. In particular an
+                // int array must start at the erased void* array's offset;
+                // its initializer and accesses still use packed native ints.
+                let specialized = NULL;
+                for (let bs = inst; bs != NULL; bs = bs->tl)
+                  if (Kinds::tvar_kind((*bs->hd)[0], &Kinds::bk)->kind != BoxKind)
+                    specialized = new List(bs->hd, specialized);
+                inst = specialized;
                 list_t<aggrfield_t> new_fields = NULL;
                 for (let fs = sd->impl->fields; fs != NULL; fs = fs->tl) {
                   let old_f    = fs->hd;
@@ -4287,12 +4310,15 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
           rmemexp = deep_copy(lmemexp);
         } else if (!is_array_type(ftype) && Kinds::kind_leq(&Kinds::ak, type_kind(ftype))) {
           // for abstract members, we have to convert to the right
-          // pointer type...
+          // pointer type. The stored member may be an erased zero-length
+          // array, so its address must pass through void*, not a temporary
+          // already claiming to point to the requested structure.
           let ct        = cstar_type(t2c, mt_tq);
-          lmemexp       = deref_exp(cast_it(ct, set_type(address_exp(lmemexp, DL), ct)), DL);
+          let address_type = void_star_type(ctxt);
+          lmemexp       = deref_exp(cast_it(ct, set_type(address_exp(lmemexp, DL), address_type)), DL);
           lmemexp->topt = t2c;
-          rmemexp       = deref_exp(cast_it(ct, set_type(address_exp(rmemexp, DL), ct)), DL);
-          lmemexp->topt = t2c;
+          rmemexp       = deref_exp(cast_it(ct, set_type(address_exp(rmemexp, DL), address_type)), DL);
+          rmemexp->topt = t2c;
         }
         s = seq_stmt_opt(s,
                          extract_pattern_vars(ctxt, rgn, nv, newdecls, prevdecls, lmemexp, rmemexp, p2));
@@ -4302,8 +4328,15 @@ static stmt_opt_t extract_pattern_vars(toc_context_t ctxt, region_t<`rgn> rgn, e
     case &Pointer_p(p2):
       let t2     = (type_t)p2->topt;
       let t2c    = typ_to_c_array(ctxt, t2);
-      let new_vd = new_vardecl(DL, temp_var(ctxt), t2c, set_type(deref_exp(rpath, DL), t2c), NULL);
-      let rp     = set_type(varb_exp(new Local_b(new_vd), DL), t2c);
+      // An abstract-sized value cannot be copied: its C struct contains only
+      // the fixed prefix, omitting nested existential tags and array data.
+      // Save the pointer instead, and project from the original allocation.
+      bool unsized = is_abstract_type(t2);
+      let temp_type = unsized ? cstar_type(t2c, mt_tq) : t2c;
+      let init = unsized ? rpath : set_type(deref_exp(rpath, DL), t2c);
+      let new_vd = new_vardecl(DL, temp_var(ctxt), temp_type, init, NULL);
+      let rp     = set_type(varb_exp(new Local_b(new_vd), DL), temp_type);
+      if (unsized) rp = set_type(deref_exp(rp, DL), t2c);
       let s      = extract_pattern_vars(ctxt, rgn, nv, newdecls, prevdecls,
                                    set_type(deref_exp(lpath, DL), t2c), rp, p2);
       if (s != NULL)

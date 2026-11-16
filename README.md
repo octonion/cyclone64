@@ -31,8 +31,9 @@ The arithmetic prover still uses 32-bit terms, so wide operations retain
 conservative runtime checks. See [native/README.md](native/README.md) for
 semantics, supported driver options, validation details and remaining limits.
 Cyclone allocation sizes are native width with checked overhead; objects must
-be smaller than `PTRDIFF_MAX`. One historical existential-array application
-remains an explicit expected failure; see [application coverage](native/APPLICATIONS.txt).
+be smaller than `PTRDIFF_MAX`. All 31 historical top-level applications,
+including existential arrays, are required to pass; see
+[application coverage](native/APPLICATIONS.txt).
 
 ## Dependencies
 

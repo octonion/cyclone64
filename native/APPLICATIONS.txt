@@ -7,10 +7,11 @@ Compilation uses generated native libc bindings and the same compiler/runtime
 as the bootstrap. Generated pointer-to-int warnings are errors. Each phase has
 a command record and log under BUILD/src/native/compiler-tests/applications.
 
-structarray is the only expected failure: translation must exit 1 and contain
-  Internal Compiler Error: bad exp after translation to C: valueof(`j)
-This is the existential array-member lowering limitation. The runner rejects
-other failures and unexpected success; remove the exception when it is fixed.
+All 31 applications must compile and run successfully (with the intentional
+signal termination described below). structarray now exercises existential
+array lengths, element access, bounds exceptions and nested variable-sized
+structures. There are no expected translation failures. See
+EXISTENTIAL-ARRAYS.md for the repair and validation record.
 
 sigaction_test intentionally raises SIGTERM after checking SIGUSR1/SIGUSR2 and
 ignored SIGTERM. A timeout is a failure, not an accepted substitute. Its output

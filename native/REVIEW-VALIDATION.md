@@ -64,7 +64,9 @@ compatibility; malloc-backed runtime units supplement collector coverage.
 
 ## Remaining limits and warnings
 
-`structarray` existential array lowering remains unsupported. The proof engine
+The subsequent `structarray` repair is recorded in EXISTENTIAL-ARRAYS.md; the
+30-pass/one-expected-failure counts above describe the original PR #1 validation.
+The proof engine
 and some historical container/string APIs retain 32-bit assumptions. The
 allocation audit covers compiler allocation lowering, runtime byte accounting,
 headers/alignment and bounds, not every standard-library container operation.

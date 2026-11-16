@@ -1,0 +1,112 @@
+#include "cyclone/library/std/core.h"
+using Core;
+
+// The bound is erased, but the tag and the native element-width argument are
+// distinct runtime values. Opening the package must preserve their relation.
+struct Sized<`a> {
+  <`n::I>
+  tag_t<`n> size;
+  `a elts[valueof(`n)];
+};
+struct Middle<`a> { int marker; struct Sized<`a> inner; };
+struct Outer<`a> { int marker; struct Middle<`a> inner; };
+
+static struct Sized<`a> @`r make(region_t<`r> r, tag_t n, `a x) {
+  return rnew(r) Sized{.size=n,.elts={for i<n:x}};
+}
+static `a get(struct Sized<`a> @p, unsigned i) {
+  let &Sized{<`n> .size=s,.elts=e}=p;
+  if (i<s) return e[i];
+  throw new Array_bounds;
+}
+static void nested_put(struct Outer<`a> @p, unsigned i, `a x) {
+  let &Outer{.inner={.inner={<`n> .size=s,.elts=e},...},...}=p;
+  if (i<s) e[i]=x;
+  else throw new Array_bounds;
+}
+static `a put(struct Sized<`a> @p, unsigned i, `a x) {
+  let &Sized{<`n> .size=s,.elts=e}=p;
+  if (i<s) return e[i]=x;
+  throw new Array_bounds;
+}
+static `a first(struct Sized<`a> @p) {
+  let &Sized{<`n> .size=s,.elts=e}=p;
+  if (s>0) return *e;
+  throw new Array_bounds;
+}
+static `a nested(struct Outer<`a> @p, unsigned i) {
+  let &Outer{.marker=m,.inner={.marker=k,.inner={<`n> .size=s,.elts=e}}}=p;
+  if (m!=19 || k!=23) throw new Assert;
+  if (i<s) return e[i];
+  throw new Array_bounds;
+}
+static `a fat_get(struct Sized<`a> @p, long i) {
+  let &Sized{<`n> .size=s,.elts=e}=p;
+  `a ?q=Core::mkfat(e,sizeof(`a),s);
+  return q[i];
+}
+static int check(struct Sized<`a> @p, unsigned n, `a x, `a y) {
+  let &Sized{<`n> .size=s,...}=p;
+  if ((unsigned)s!=n) return 1;
+  for (unsigned i=0;i<n;++i) {
+    if (get(p,i)!=x || put(p,i,y)!=y || get(p,i)!=y) return 2;
+  }
+  if (n && first(p)!=y) return 3;
+  try { get(p,n); return 4; } catch { case &Array_bounds: break; }
+  try { put(p,n,x); return 5; } catch { case &Array_bounds: break; }
+  try { get(p,0xffffffffU); return 6; } catch { case &Array_bounds: break; }
+  try { fat_get(p,-1L); return 7; } catch { case &Array_bounds: break; }
+  try { fat_get(p,(long)n); return 8; } catch { case &Array_bounds: break; }
+  try { fat_get(p,0x100000000L); return 9; } catch { case &Array_bounds: break; }
+  if (!n) {
+    try { first(p); return 10; } catch { case &Array_bounds: break; }
+  } else if (fat_get(p,(long)n-1)!=y) return 11;
+  return 0;
+}
+
+// Cover the NullOnly annotation as well as NoCheck. A constant thin bound
+// still requires a runtime check for a wide index.
+static `a nullable(`a *p) { return *p; }
+static `a fixed(`a p[2], long i) { return p[i]; }
+static int accesses() {
+  int a[2]={31,-47};
+  int *p=NULL;
+  if (nullable(&a[0])!=31 || fixed(a,1L)!=-47) return 1;
+  try { nullable(p); return 2; } catch { case &Null_Exception: break; }
+  try { fixed(a,-1L); return 3; } catch { case &Array_bounds: break; }
+  try { fixed(a,2L); return 4; } catch { case &Array_bounds: break; }
+  try { fixed(a,0x100000000L); return 5; } catch { case &Array_bounds: break; }
+  return 0;
+}
+
+static int dynamic(tag_t n) {
+  region r;
+  let small=rnew(r) Sized{.size=n,.elts={for i<n: -17}};
+  let wide=new Sized{.size=n,.elts={for i<n: 0x1234567800000011L}};
+  let x=new 41;
+  let y=new 53;
+  let pointers=new Sized{.size=n,.elts={for i<n: x}};
+  if (check(small,(unsigned)n,-17,29)) return 1;
+  if (check(wide,(unsigned)n,0x1234567800000011L,0x4321876500000029L)) return 2;
+  if (check(pointers,(unsigned)n,x,y)) return 3;
+  let generic=make(r,n,-37);
+  if (check(generic,(unsigned)n,-37,43)) return 4;
+  let box=rnew(r) Outer{.marker=19,.inner={.marker=23,
+    .inner={.size=n,.elts={for i<n: -71}}}};
+  for (unsigned i=0;i<(unsigned)n;++i) {
+    if (nested(box,i)!=-71) return 5;
+    nested_put(box,i,83);
+    if (nested(box,i)!=83) return 6;
+  }
+  try { nested(box,(unsigned)n); return 7; } catch { case &Array_bounds: break; }
+  try { nested_put(box,(unsigned)n,0); return 8; } catch { case &Array_bounds: break; }
+  return 0;
+}
+
+int main(int argc,string_t ?argv) {
+  if (accesses()) return 1;
+  if (dynamic(0)) return 2;
+  if (dynamic(1)) return 3;
+  if (dynamic(17)) return 4;
+  return 0;
+}

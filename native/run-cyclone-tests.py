@@ -48,11 +48,19 @@ for ref in ([] if a.skip_diagnostics else sorted(pathlib.Path('testsuite/compile
     (out / (src.stem + '.diff')).write_text(''.join(difflib.unified_diff(expected.splitlines(True), got.splitlines(True))))
     expected_exit = 1 if 'COMPILATION FAILED!' in expected else 0
     results.append((src.stem, 'PASS' if got == expected and q.returncode == expected_exit else f'DIFF (exit {q.returncode}, expected {expected_exit})'))
-# Overflow must be diagnosed rather than silently wrapping in the lexer.
+# Reject overflowing literals and accesses whose erased bounds cannot be checked.
+rejection_diagnostics = {
+    'existential-array-unchecked': 'cannot determine subscript is in bounds',
+    'existential-array-wide': 'cannot determine subscript is in bounds',
+}
 for src in ([] if a.skip_rejections else sorted(pathlib.Path('native/cyclone-reject').glob('*.cyc'))):
     (out/(src.stem+'.c')).unlink(missing_ok=True)
-    q = run([compiler, *shlex.split(a.compiler_flags), '-o', out / (src.stem + '.c'), src], src.stem)
-    ok = q.returncode == 1 and 'integer constant too large' in q.stdout + q.stderr
+    pre = out / (src.stem + '.cyp')
+    q = run([a.cc, '-E', '-x', 'c', '-nostdinc', src, '-o', pre], src.stem + '-cpp')
+    if q.returncode: results.append((src.stem, 'PREPROCESS FAIL')); continue
+    q = run([compiler, *shlex.split(a.compiler_flags), '-o', out / (src.stem + '.c'), pre], src.stem)
+    diagnostic = rejection_diagnostics.get(src.stem, 'integer constant too large')
+    ok = q.returncode == 1 and diagnostic in q.stdout + q.stderr
     results.append((src.stem, 'PASS' if ok else f'REJECTION FAIL ({q.returncode})'))
 objects = sorted((build / 'cyclone/stage0/library/std').rglob('*.o')) + runtime_objects(build)
 if stage:

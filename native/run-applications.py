@@ -9,11 +9,6 @@ p.add_argument('--out',default='native/compiler-tests/applications');p.add_argum
 a=p.parse_args();out=pathlib.Path(a.out).resolve();out.mkdir(parents=True,exist_ok=True)
 build=pathlib.Path(a.build).resolve();stage=pathlib.Path(a.stage_dir).resolve()
 objects=sorted((stage/'library/std').glob('*.o'))+[stage/'native/generated/lineno.o',stage/'native/generated/libc/cycstubs.o',stage/'cstubs.o',stage/'boot_cstubs.o']+runtime_objects(build)
-# Expected failures are precise and must be removed when the test succeeds.
-EXPECTED={'structarray': {
-    'phase':'translate', 'exit':1,
-    'diagnostic':'Internal Compiler Error: bad exp after translation to C: valueof(`j)',
-    'reason':'existential array valueof lowering is not implemented (native/APPLICATIONS.txt)'}}
 def execute(cmd,label,timeout=120):
     cmd=list(map(str,cmd));(out/(label+'.command.json')).write_text(json.dumps(cmd,indent=2)+'\n')
     try:
@@ -38,9 +33,6 @@ def test(src):
     for phase,cmd in cmds:
         code,text=execute(cmd,name+'-'+phase)
         if code:
-            expected=EXPECTED.get(name)
-            if expected and phase==expected['phase'] and code==expected['exit'] and expected['diagnostic'] in text:
-                return name,'XFAIL: '+expected['reason']
             return name,f'{phase} FAIL ({code})'
     args=[str(exe)]
     if name=='histogram':args.append('testsuite/tests/histogram.txt')
@@ -50,10 +42,9 @@ def test(src):
     else:ok=code==0
     if name.startswith('refcnt_'):ok=ok and 'All tests passed.' in text
     if name=='scheme-2':ok=ok and 'program returned:' in text and '##unspecified##' in text
-    if name in EXPECTED:return name,'XPASS: remove expected failure'
     return name,'PASS' if ok else f'run FAIL ({code})'
 with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as pool:
     results=list(pool.map(test,sorted(pathlib.Path('testsuite/tests').glob('*.cyc'))))
 summary=''.join(f'{name}: {result}\n' for name,result in results)
 (out/'results.txt').write_text(summary);print(summary,end='')
-sys.exit(any(result!='PASS' and not result.startswith('XFAIL:') for _,result in results))
+sys.exit(any(result!='PASS' for _,result in results))

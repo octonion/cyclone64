@@ -1,0 +1,6 @@
+struct Sized<`a> { <`n::I> tag_t<`n> size; `a elts[valueof(`n)]; };
+void unchecked(struct Sized<`a> @p, unsigned i, `a x) {
+  let &Sized{<`n> .size=s,.elts=e}=p;
+  // Erasing the length must never make an unproved access admissible.
+  e[i]=x;
+}

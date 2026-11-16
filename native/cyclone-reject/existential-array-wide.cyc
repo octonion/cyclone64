@@ -1,0 +1,7 @@
+struct Sized<`a> { <`n::I> tag_t<`n> size; `a elts[valueof(`n)]; };
+void wide(struct Sized<`a> @p, unsigned long i, `a x) {
+  let &Sized{<`n> .size=s,.elts=e}=p;
+  // The 32-bit prover cannot discharge a native-width subscript. A runtime
+  // check is required, and a type-only bound cannot supply that check.
+  if (i<s) e[i]=x;
+}
